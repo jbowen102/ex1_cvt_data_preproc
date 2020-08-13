@@ -1,0 +1,8 @@
+__pycache__/
+.~*
+*.pyc
+*.out
+/raw_data
+/sync_data
+/plots
+/reference_docs
