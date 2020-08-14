@@ -233,13 +233,14 @@ def sync_data(INCA_data, eDAQ_data):
         index_offset = inca_pedal_high_start_i - match_time_index
 
         # this is where the duplicate dict comes in handy.
-        # for k in INCA_data.keys():
+
         for k in INCA_data:
-            if k == 'time':
-                # Shift time vector the other way to keep starting point at 0
-                INCA_mdata[k] = INCA_data[k][:-index_offset]
-            else:
-                INCA_mdata[k] = INCA_data[k][index_offset:]
+            INCA_mdata[k] = INCA_data[k][index_offset:]
+        # Offset time values to still start at zero
+        start_time = INCA_data['time'][0] # necessary because streams doesn't necessarily start at time 0 (dumb)
+        new_start_time = INCA_mdata['time'][0]
+        INCA_mdata['time'] = [x - (new_start_time-start_time) for x in INCA_mdata['time']]
+        # https://stackoverflow.com/questions/4918425/subtract-a-value-from-every-number-in-a-list-in-python
 
     else:
         # remove time from beginning of eDAQ file
@@ -248,14 +249,12 @@ def sync_data(INCA_data, eDAQ_data):
         index_offset = edaq_pedal_high_start_i - match_time_index
 
         # this is where the duplicate dict comes in handy.
-        # for k in eDAQ_data.keys():
         for k in eDAQ_data:
-            if k == 'time':
-                # Cut values off the back end to keep starting time = 0.
-                eDAQ_mdata[k] = eDAQ_data[k][:-index_offset]
-            else:
-                # Cut values off the front end.
-                eDAQ_mdata[k] = eDAQ_data[k][index_offset:]
+            eDAQ_mdata[k] = eDAQ_data[k][index_offset:]
+            # Offset time values to still start at zero
+            start_time = eDAQ_data['time'][0] # necessary because streams doesn't necessarily start at time 0 (dumb)
+            new_start_time = eDAQ_mdata['time'][0]
+            eDAQ_mdata['time'] = [x - (new_start_time-start_time) for x in eDAQ_mdata['time']]
 
 
     # Now print new pedal-high times as a check
@@ -283,9 +282,10 @@ INCA_data_list, INCA_data, eDAQ_data_list, eDAQ_data = data_read(INCA_data_path,
 INCA_mdata, eDAQ_mdata = sync_data(INCA_data, eDAQ_data)
 
 
-# Delete all data before that point (later change to have a buffer before - measured in time, not data points.)
-# Don't delete column headers
-# Offset time values to stat at zero
+# Delete useless data before the first pedal actuation
+# Keep first time value = 0
+# truncate_data(INCA_mdata, eDAQ_mdata)
+
 
 
 
