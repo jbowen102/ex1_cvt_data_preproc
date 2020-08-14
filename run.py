@@ -9,6 +9,11 @@ class FilenameError(Exception):
 class DataReadError(Exception):
     pass
 
+class DataSyncError(Exception):
+    pass
+
+
+
 # This isn't used, but I found a way to digest the input string and escape the backslashes
 # that I didn't know before.
 def path_intake(data_type):
@@ -106,6 +111,36 @@ def find_edaq_col_offset(header_row, sub_run_num):
     return run_start_col
 
 
+def find_closest(t_val, t_list):
+    """
+    Takes in a time value and a list of times.
+    Returns the index of the closest time value in the list.
+    Linear search - O(n) time complexity. Bisection search would be better but probably unnecessary.
+    (Originally part of Alt_Test_Data program. Modified here for Python3)
+    """
+
+    time_index = 0
+    smallest_diff = (t_val - t_list[time_index]) ** 2
+    for i, time in enumerate(t_list):
+        # print 't = %d' % t
+        diff = (t_val - time) ** 2
+        # print 'diff = %f' % diff
+        if diff < smallest_diff:
+            smallest_diff = diff
+            time_index = i
+
+    print('Value in t_list closest to t_val (%f): %f' % (t_val, t_list[time_index]))
+    print('Index of t_list with value closest to t_val (%f): %d' % (
+                                                                t_val, time_index))
+
+    # Closest val should never be farther than half the lowest sampling rate.
+    if (t_val-t_list[time_index])**2 > ((1.0/15)/2)**2:
+        raise DataSyncError("Error syncing data. Can't find close "
+                            "enough timestamp match.")
+
+    return time_index
+
+
 def data_read(INCA_path, eDAQ_path, run_num_text):
     # run_num = int(run_num_text)
     sub_run_num = int(run_num_text[2:4])
@@ -159,10 +194,10 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
                 # only add this run's channels to our data list. Don't forget the first column is always time though.
                 eDAQ_data_list.append([ eDAQ_row[0], eDAQ_row[run_start_col+1], eDAQ_row[run_start_col+2] ])
 
-                eDAQ_data_dict['time'].append(float(eDAQ_row[0]))
                 # Need to make sure we haven't reached end of channel stream.
                 # Time vector may keep going past a channel's data
                 if eDAQ_row[run_start_col+1]:
+                    eDAQ_data_dict['time'].append(float(eDAQ_row[0]))
                     # not reading in the first channel because it's pedal voltage and not needed.
                     eDAQ_data_dict['gnd_speed'].append(float(eDAQ_row[run_start_col+1]))
                     eDAQ_data_dict['pedal_sw'].append(float(eDAQ_row[run_start_col+2]))
@@ -171,22 +206,37 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
     return INCA_data_list, INCA_data_dict, eDAQ_data_list, eDAQ_data_dict
 
 
-# Read in data from INCA file
-# INCA_data_path = path_intake("INCA")
-# eDAQ_data_path = path_intake("eDAQ") # better to do this automatically
-# print(INCA_data_path) # debug
 
 [run_num, INCA_data_path, eDAQ_data_path] = path_find()
 # print(run_num) # debug
-print(INCA_data_path) # debug
-print(eDAQ_data_path) # debug
+print("\t%s" % INCA_data_path) # debug
+print("\t%s\n" % eDAQ_data_path) # debug
 
 # as written, eDAQ file will have to be repeatedly opened and read for each separate INCA run.
 # if this ends up too slow, program can be re-written a different way. It's probably fine now though.
-[INCA_data_list, INCA_data_dict, eDAQ_data_list, eDAQ_data_dict] = data_read(INCA_data_path, eDAQ_data_path, run_num)
+[INCA_data_list, INCA_data,
+ eDAQ_data_list, eDAQ_data] = data_read(INCA_data_path, eDAQ_data_path, run_num)
 
 
 # find first time pedal goes logical high in both.
+inca_pedal_high_start_i = INCA_data['pedal_sw'].index(1)
+inca_pedal_high_start_t = INCA_data['time'][inca_pedal_high_start_i]
+
+edaq_pedal_high_start_i = eDAQ_data['pedal_sw'].index(1)
+edaq_pedal_high_start_t = eDAQ_data['time'][edaq_pedal_high_start_i]
+print("\nINCA first pedal high: %f" % inca_pedal_high_start_t)
+print("eDAQ first pedal high: %f" % edaq_pedal_high_start_t)
+
+if inca_pedal_high_start_t > edaq_pedal_high_start_t:
+    # remove more time from beginning of INCA file
+
+    time_index = find_closest(edaq_pedal_high_start_t, INCA_data['time'])
+
+    # difference = inca_pedal_high_start_t - edaq_pedal_high_start_t
+else:
+    time_index = find_closest(inca_pedal_high_start_t, eDAQ_data['time'])
+
+
 # Delete all data before that point (later change to have a buffer before - measured in time, not data points.)
 # Don't delete column headers
 # Offset time values to stat at zero
