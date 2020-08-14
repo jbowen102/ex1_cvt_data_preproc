@@ -206,35 +206,81 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
     return INCA_data_list, INCA_data_dict, eDAQ_data_list, eDAQ_data_dict
 
 
+def sync_data(INCA_data, eDAQ_data):
+    """
+    Takes in two dicts of data.
+    Syncs data based on matching the first time the pedal switch goes high.
+    Returns two dicts containing lists of synced data.
+    """
+    # copy() needed to prevent unwanted side effects / aliasing.
+    INCA_mdata = INCA_data.copy()
+    eDAQ_mdata = eDAQ_data.copy()
 
-[run_num, INCA_data_path, eDAQ_data_path] = path_find()
+    # find first time pedal goes logical high in both.
+    inca_pedal_high_start_i = INCA_data['pedal_sw'].index(1)
+    inca_pedal_high_start_t = INCA_data['time'][inca_pedal_high_start_i]
+
+    edaq_pedal_high_start_i = eDAQ_data['pedal_sw'].index(1)
+    edaq_pedal_high_start_t = eDAQ_data['time'][edaq_pedal_high_start_i]
+    print("\nINCA first pedal high: %f" % inca_pedal_high_start_t)
+    print("eDAQ first pedal high: %f" % edaq_pedal_high_start_t)
+
+
+    if inca_pedal_high_start_t > edaq_pedal_high_start_t:
+        # remove time from beginning of INCA file
+        print("Removing data from beginning of INCA channels.")
+        match_time_index = find_closest(edaq_pedal_high_start_t, INCA_data['time'])
+        index_offset = inca_pedal_high_start_i - match_time_index
+
+        # this is where the duplicate dict comes in handy.
+        # for k in INCA_data.keys():
+        for k in INCA_data:
+            if k == 'time':
+                # Shift time vector the other way to keep starting point at 0
+                INCA_mdata[k] = INCA_data[k][:-index_offset]
+            else:
+                INCA_mdata[k] = INCA_data[k][index_offset:]
+
+    else:
+        # remove time from beginning of eDAQ file
+        print("Removing data from beginning of eDAQ channels.")
+        match_time_index = find_closest(inca_pedal_high_start_t, eDAQ_data['time'])
+        index_offset = edaq_pedal_high_start_i - match_time_index
+
+        # this is where the duplicate dict comes in handy.
+        # for k in eDAQ_data.keys():
+        for k in eDAQ_data:
+            if k == 'time':
+                # Cut values off the back end to keep starting time = 0.
+                eDAQ_mdata[k] = eDAQ_data[k][:-index_offset]
+            else:
+                # Cut values off the front end.
+                eDAQ_mdata[k] = eDAQ_data[k][index_offset:]
+
+
+    # Now print new pedal-high times as a check
+    inca_pedal_high_start_i = INCA_mdata['pedal_sw'].index(1)
+    inca_pedal_high_start_t = INCA_mdata['time'][inca_pedal_high_start_i]
+
+    edaq_pedal_high_start_i = eDAQ_mdata['pedal_sw'].index(1)
+    edaq_pedal_high_start_t = eDAQ_mdata['time'][edaq_pedal_high_start_i]
+
+    print("\nSynced INCA first pedal high: %f" % inca_pedal_high_start_t)
+    print("Synced eDAQ first pedal high: %f" % edaq_pedal_high_start_t)
+
+    return INCA_mdata, eDAQ_mdata
+
+
+run_num, INCA_data_path, eDAQ_data_path = path_find()
 # print(run_num) # debug
 print("\t%s" % INCA_data_path) # debug
 print("\t%s\n" % eDAQ_data_path) # debug
 
 # as written, eDAQ file will have to be repeatedly opened and read for each separate INCA run.
 # if this ends up too slow, program can be re-written a different way. It's probably fine now though.
-[INCA_data_list, INCA_data,
- eDAQ_data_list, eDAQ_data] = data_read(INCA_data_path, eDAQ_data_path, run_num)
+INCA_data_list, INCA_data, eDAQ_data_list, eDAQ_data = data_read(INCA_data_path, eDAQ_data_path, run_num)
 
-
-# find first time pedal goes logical high in both.
-inca_pedal_high_start_i = INCA_data['pedal_sw'].index(1)
-inca_pedal_high_start_t = INCA_data['time'][inca_pedal_high_start_i]
-
-edaq_pedal_high_start_i = eDAQ_data['pedal_sw'].index(1)
-edaq_pedal_high_start_t = eDAQ_data['time'][edaq_pedal_high_start_i]
-print("\nINCA first pedal high: %f" % inca_pedal_high_start_t)
-print("eDAQ first pedal high: %f" % edaq_pedal_high_start_t)
-
-if inca_pedal_high_start_t > edaq_pedal_high_start_t:
-    # remove more time from beginning of INCA file
-
-    time_index = find_closest(edaq_pedal_high_start_t, INCA_data['time'])
-
-    # difference = inca_pedal_high_start_t - edaq_pedal_high_start_t
-else:
-    time_index = find_closest(inca_pedal_high_start_t, eDAQ_data['time'])
+INCA_mdata, eDAQ_mdata = sync_data(INCA_data, eDAQ_data)
 
 
 # Delete all data before that point (later change to have a buffer before - measured in time, not data points.)
