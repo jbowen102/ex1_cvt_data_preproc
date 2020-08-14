@@ -111,7 +111,10 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
     sub_run_num = int(run_num_text[2:4])
 
     INCA_data_list = []
-    INCA_data_dict = {}
+    INCA_data_dict = {'time': [],
+                      'pedal_sw': [],
+                      'engine_spd': [],
+                      'throttle': []}
 
     # Read in both eDAQ and INCA data for specific run.
     # read INCA data first
@@ -135,7 +138,10 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
     # eDAQ_channel_count = 3
 
     eDAQ_data_list = []
-    eDAQ_data_dict = {}
+    eDAQ_data_dict = {'time': [],
+                      'gnd_speed': [],
+                      'pedal_sw': []}
+
     # now read eDAQ data
     with open(eDAQ_path, 'r') as edaq_ascii_file:
         print("Reading eDAQ data from ASCII...") # debug
@@ -147,21 +153,22 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
                 # The first row is a list of channel names.
                 # Loop through and find the first channel for this run.
                 run_start_col = find_edaq_col_offset(eDAQ_row, sub_run_num)
+                # print("run_start_col = %d" % run_start_col) # debug
 
             elif j > 0:
                 # only add this run's channels to our data list. Don't forget the first column is always time though.
                 eDAQ_data_list.append([ eDAQ_row[0], eDAQ_row[run_start_col+1], eDAQ_row[run_start_col+2] ])
 
                 eDAQ_data_dict['time'].append(float(eDAQ_row[0]))
-                # not reading in the first channel because it's pedal voltage and not needed.
-                eDAQ_data_dict['gd_speed'].append(float(eDAQ_row[run_start_col+1]))
-                eDAQ_data_dict['pedal_sw'].append(float(eDAQ_row[run_start_col+2]))
+                # Need to make sure we haven't reached end of channel stream.
+                # Time vector may keep going past a channel's data
+                if eDAQ_row[run_start_col+1]:
+                    # not reading in the first channel because it's pedal voltage and not needed.
+                    eDAQ_data_dict['gnd_speed'].append(float(eDAQ_row[run_start_col+1]))
+                    eDAQ_data_dict['pedal_sw'].append(float(eDAQ_row[run_start_col+2]))
     print("...done")
 
-
-
-    print("...done")
-    return data_list, data_dict
+    return INCA_data_list, INCA_data_dict, eDAQ_data_list, eDAQ_data_dict
 
 
 # Read in data from INCA file
@@ -170,19 +177,37 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
 # print(INCA_data_path) # debug
 
 [run_num, INCA_data_path, eDAQ_data_path] = path_find()
-print(run_num) # debug
+# print(run_num) # debug
 print(INCA_data_path) # debug
 print(eDAQ_data_path) # debug
 
 # as written, eDAQ file will have to be repeatedly opened and read for each separate INCA run.
-# if this ends up too slow, program to be re-written a different way. It's probably fine now though.
-data_read(INCA_data_path, eDAQ_data_path, run_num)
-
-# Read into dictionary instead of list? Or both?
-# Need to read data differently from eDAQ file.
+# if this ends up too slow, program can be re-written a different way. It's probably fine now though.
+[INCA_data_list, INCA_data_dict, eDAQ_data_list, eDAQ_data_dict] = data_read(INCA_data_path, eDAQ_data_path, run_num)
 
 
 # find first time pedal goes logical high in both.
 # Delete all data before that point (later change to have a buffer before - measured in time, not data points.)
 # Don't delete column headers
 # Offset time values to stat at zero
+
+
+
+
+
+
+# debug
+# print(INCA_data_list[0][2])
+# print(INCA_data_list[1][1])
+# print(INCA_data_list[7][0])
+# print(eDAQ_data_list[0][2])
+# print(eDAQ_data_list[1][1])
+# print(eDAQ_data_list[7][0])
+# print(INCA_data_dict['throttle'][38])
+# print(INCA_data_dict['engine_spd'][315])
+# print(INCA_data_dict['pedal_sw'][305])
+# print(INCA_data_dict['pedal_sw'][306])
+# print(eDAQ_data_dict['gnd_speed'][0])
+# print(eDAQ_data_dict['gnd_speed'][1])
+# print(eDAQ_data_dict['pedal_sw'][630])
+# print(eDAQ_data_dict['pedal_sw'][631])
