@@ -6,7 +6,11 @@ import csv
 class FilenameError(Exception):
     pass
 
+class DataReadError(Exception):
+    pass
 
+# This isn't used, but I found a way to digest the input string and escape the backslashes
+# that I didn't know before.
 def path_intake(data_type):
     """Data type should be 'eDAQ' or 'INCA'
     Returns correctly-formatted file path string."""
@@ -81,30 +85,79 @@ def run_name_parse(filename):
     return run_num
 
 
-def data_read(path, type, run_num):
-    data_list = []
-    data_dict = {}
-    # Open file with read priveleges. file automatically closed at end of "with" block.
-    with open(path, 'r') as asciifile01:
-        print("Reading %s data from ASCII..." % type) # debug
-        file_in = csv.reader(asciifile01, delimiter="\t")
+def find_edaq_col_offset(header_row, sub_run_num):
+    """Takes in an eDAQ file's header row and finds the first column header
+    containing the indicated run number.
+    Returns the index of the first such column."""
+    sub_run_num_edaq_format = "RN_"+str(sub_run_num)
+
+    found_col = False
+    for n, col in enumerate(header_row):
+        if sub_run_num_edaq_format in col: # converting to int (abov) and back to string strips off the zero padding
+            # save that index to reference for the rest of the main loop
+            run_start_col = n
+            found_col = True
+            break
+
+    if not found_col:
+        # got to end of row and didn't find the run in any column heading
+        raise DataReadError("Can't find %s in file %s" % (sub_run_num_edaq_format, eDAQ_path))
+
+    return run_start_col
+
+
+def data_read(INCA_path, eDAQ_path, run_num_text):
+    # run_num = int(run_num_text)
+    sub_run_num = int(run_num_text[2:4])
+
+    INCA_data_list = []
+    INCA_data_dict = {}
+
+    # Read in both eDAQ and INCA data for specific run.
+    # read INCA data first
+    # Open file with read priveleges. file automatically closed at end of "with/as" block.
+    with open(INCA_path, 'r') as inca_ascii_file:
+        print("Reading INCA data from ASCII...") # debug
+        INCA_file_in = csv.reader(inca_ascii_file, delimiter="\t")
         # https://stackoverflow.com/questions/7856296/parsing-csv-tab-delimited-txt-file-with-python
-        if type == "eDAQ":
-            offset =
 
-        i = 0
-        for row in file_in:
-            if type == "INCA" and i >= 5:
-                data_list.append(row)
+        for i, INCA_row in enumerate(INCA_file_in):
+            if i >= 5:
+                INCA_data_list.append(INCA_row)
 
-                data_dict['time'].append(float(row[0]))
-                data_dict['pedal_sw'].append(float(row[1]))
-                data_dict['engine_spd'].append(float(row[2]))
-                data_dict['throttle'].append(float(row[3]))
+                INCA_data_dict['time'].append(float(INCA_row[0]))
+                INCA_data_dict['pedal_sw'].append(float(INCA_row[1]))
+                INCA_data_dict['engine_spd'].append(float(INCA_row[2]))
+                INCA_data_dict['throttle'].append(float(INCA_row[3]))
+    print("...done")
 
-            elif type == "eDAQ" and i >= 1:
-                pass
-            elif type == "eDAQ" and i == 1:
+    # magic number for how many channels per run in the eDAQ files.
+    # eDAQ_channel_count = 3
+
+    eDAQ_data_list = []
+    eDAQ_data_dict = {}
+    # now read eDAQ data
+    with open(eDAQ_path, 'r') as edaq_ascii_file:
+        print("Reading eDAQ data from ASCII...") # debug
+        eDAQ_file_in = csv.reader(edaq_ascii_file, delimiter="\t")
+        # https://stackoverflow.com/questions/7856296/parsing-csv-tab-delimited-txt-file-with-python
+
+        for j, eDAQ_row in enumerate(eDAQ_file_in):
+            if j == 0:
+                # The first row is a list of channel names.
+                # Loop through and find the first channel for this run.
+                run_start_col = find_edaq_col_offset(eDAQ_row, sub_run_num)
+
+            elif j > 0:
+                # only add this run's channels to our data list. Don't forget the first column is always time though.
+                eDAQ_data_list.append([ eDAQ_row[0], eDAQ_row[run_start_col+1], eDAQ_row[run_start_col+2] ])
+
+                eDAQ_data_dict['time'].append(float(eDAQ_row[0]))
+                # not reading in the first channel because it's pedal voltage and not needed.
+                eDAQ_data_dict['gd_speed'].append(float(eDAQ_row[run_start_col+1]))
+                eDAQ_data_dict['pedal_sw'].append(float(eDAQ_row[run_start_col+2]))
+    print("...done")
+
 
 
     print("...done")
@@ -121,8 +174,9 @@ print(run_num) # debug
 print(INCA_data_path) # debug
 print(eDAQ_data_path) # debug
 
-# data_read(INCA_data_path, "INCA")
-# data_read(INCA_data_path, "eDAQ")
+# as written, eDAQ file will have to be repeatedly opened and read for each separate INCA run.
+# if this ends up too slow, program to be re-written a different way. It's probably fine now though.
+data_read(INCA_data_path, eDAQ_data_path, run_num)
 
 # Read into dictionary instead of list? Or both?
 # Need to read data differently from eDAQ file.
