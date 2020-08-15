@@ -17,7 +17,7 @@ class DataSyncError(Exception):
 # This isn't used, but I found a way to digest the input string and escape the
 # backslashes that I didn't know before.
 def path_intake(data_type):
-    """Data type should be 'eDAQ' or 'INCA'
+    """Data type should be "eDAQ" or "INCA"
     Returns correctly-formatted file path string."""
     data_path_win = input("Enter file name of %s data ready for sync "
                             "(include 'r' before the string):\n>" % data_type)
@@ -36,7 +36,7 @@ def path_intake(data_type):
 
 
 def path_find():
-    """Data type should be 'eDAQ' or 'INCA'
+    """Data type should be 'eDAQ" or 'INCA'
     Returns correctly-formatted file path string."""
     user_run_num = input("Enter run num (four digits)\n> ")
     if len(user_run_num) < 4:
@@ -88,6 +88,7 @@ def path_find():
 def run_name_parse(filename):
     """Assuming INCA data type
     Returns run number."""
+
     run_num = filename.split("_")[1][0:4]
     return run_num
 
@@ -96,13 +97,14 @@ def find_edaq_col_offset(header_row, sub_run_num):
     """Takes in an eDAQ file's header row and finds the first column header
     containing the indicated run number.
     Returns the index of the first such column."""
+
     sub_run_num_edaq_format = "RN_"+str(sub_run_num)
     # converting to int (in caller function) and back to str strips zero padding
 
     found_col = False
     for n, col in enumerate(header_row):
         if sub_run_num_edaq_format in col:
-            # save that index to reference for the rest of the main loop
+            # save that index
             run_start_col = n
             found_col = True
             break
@@ -127,16 +129,14 @@ def find_closest(t_val, t_list):
     time_index = 0
     smallest_diff = (t_val - t_list[time_index]) ** 2
     for i, time in enumerate(t_list):
-        # print 't = %d' % t
         diff = (t_val - time) ** 2
-        # print 'diff = %f' % diff
         if diff < smallest_diff:
             smallest_diff = diff
             time_index = i
 
-    print('Value in t_list closest to t_val (%f): %f' %
+    print("Value in t_list closest to t_val (%f): %f" %
                                                     (t_val, t_list[time_index]))
-    print('Index of t_list with value closest to t_val (%f): %d' %
+    print("Index of t_list with value closest to t_val (%f): %d" %
                                                             (t_val, time_index))
 
     # Closest val should never be farther than half the lowest sampling rate.
@@ -148,25 +148,27 @@ def find_closest(t_val, t_list):
 
 
 def data_read(INCA_path, eDAQ_path, run_num_text):
-    # run_num = int(run_num_text)
     sub_run_num = int(run_num_text[2:4])
 
-    # INCA_data_list = []
-    INCA_data_dict = {'time': [],
-                      'pedal_sw': [],
-                      'engine_spd': [],
-                      'throttle': []}
+    INCA_data_dict = {"time": [],
+                      "pedal_sw": [],
+                      "engine_spd": [],
+                      "throttle": []}
 
     # Read in both eDAQ and INCA data for specific run.
     # read INCA data first
     # Open file with read priveleges.
     # File automatically closed at end of "with/as" block.
-    with open(INCA_path, 'r') as inca_ascii_file:
+    with open(INCA_path, "r") as inca_ascii_file:
         print("Reading INCA data from ASCII...") # debug
         INCA_file_in = csv.reader(inca_ascii_file, delimiter="\t")
         # https://stackoverflow.com/questions/7856296/parsing-csv-tab-delimited-txt-file-with-python
 
+        # Save headers so we can use them when exporting synced data.
+        INCA_headers = []
         for i, INCA_row in enumerate(INCA_file_in):
+            if i < 5:
+                INCA_headers.append(INCA_row)
             if i == 5:
                 # first row of actual data - contains first time value.
                 # if it's nonzero, need to force it there then offset all future
@@ -175,34 +177,26 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
             # using if instead of elif here because I need both if statements to
             # run in the case of i == 5. if/elif blocks are mutually exclusive.
             if i >= 5:
-                # shift time vector to start at zero.
-                # row has all strings, so have to convert back and forth.
-                # Might lose some precision doing this, but will be negligible.
-                # INCA_row[0] = str(float(INCA_row[0]) - inca_time_offset)
-
-                # INCA_data_list.append(INCA_row)
-
-                INCA_data_dict['time'].append(
+                # shift time values to be relative at a zero start point.
+                INCA_data_dict["time"].append(
                                         float(INCA_row[0]) - inca_time_offset)
-                INCA_data_dict['pedal_sw'].append(float(INCA_row[1]))
-                INCA_data_dict['engine_spd'].append(float(INCA_row[2]))
-                INCA_data_dict['throttle'].append(float(INCA_row[3]))
+                INCA_data_dict["pedal_sw"].append(float(INCA_row[1]))
+                INCA_data_dict["engine_spd"].append(float(INCA_row[2]))
+                INCA_data_dict["throttle"].append(float(INCA_row[3]))
     print("...done")
 
-    # magic number for how many channels per run in the eDAQ files.
-    # eDAQ_channel_count = 3
-
-    # eDAQ_data_list = []
-    eDAQ_data_dict = {'time': [],
-                      'gnd_speed': [],
-                      'pedal_sw': []}
+    eDAQ_data_dict = {"time": [],
+                      "gnd_speed": [],
+                      "pedal_sw": []}
 
     # now read eDAQ data
-    with open(eDAQ_path, 'r') as edaq_ascii_file:
+    with open(eDAQ_path, "r") as edaq_ascii_file:
         print("Reading eDAQ data from ASCII...") # debug
         eDAQ_file_in = csv.reader(edaq_ascii_file, delimiter="\t")
         # https://stackoverflow.com/questions/7856296/parsing-csv-tab-delimited-txt-file-with-python
 
+        # Save headers so we can use them when exporting synced data.
+        eDAQ_headers = []
         for j, eDAQ_row in enumerate(eDAQ_file_in):
             if j == 0:
                 # The first row is a list of channel names.
@@ -210,26 +204,32 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
                 run_start_col = find_edaq_col_offset(eDAQ_row, sub_run_num)
                 # print("run_start_col = %d" % run_start_col) # debug
 
+                # Save headers so we can use them when exporting synced data.
+                # Not reading in the first channel eDAQ_row[run_start_col]
+                # because it's pedal voltage and not needed.
+                eDAQ_headers.append([eDAQ_row[0]] +
+                                    eDAQ_row[run_start_col+1:run_start_col+3])
             elif j > 0:
                 # Only add this run's channels to our data list.
                 # Don't forget the first column is always time though.
-                # eDAQ_data_list.append([ eDAQ_row[0], eDAQ_row[run_start_col+1],
-                #                                     eDAQ_row[run_start_col+2] ])
 
                 # Need to make sure we haven't reached end of channel stream.
-                # Time vector may keep going past a channel's data
+                # Time vector may keep going past a channel's data, so look at
+                # a run-specific channel to see if the run's ended.
                 if eDAQ_row[run_start_col+1]:
-                    eDAQ_data_dict['time'].append(float(eDAQ_row[0]))
-                    # Not reading in the first channel because it's pedal
-                    # voltage and not needed.
-                    eDAQ_data_dict['gnd_speed'].append(
+                    eDAQ_data_dict["time"].append(float(eDAQ_row[0]))
+                    # Not reading in the first channel eDAQ_row[run_start_col]
+                    # because it's pedal voltage and not needed.
+                    eDAQ_data_dict["gnd_speed"].append(
                                             float(eDAQ_row[run_start_col+1]))
-                    eDAQ_data_dict['pedal_sw'].append(
+                    eDAQ_data_dict["pedal_sw"].append(
                                             float(eDAQ_row[run_start_col+2]))
     print("...done")
 
-    # return INCA_data_list, INCA_data_dict, eDAQ_data_list, eDAQ_data_dict
-    return INCA_data_dict, eDAQ_data_dict
+    print(INCA_headers)
+    print(eDAQ_headers)
+
+    return INCA_headers, eDAQ_headers, INCA_data_dict, eDAQ_data_dict
 
 
 def sync_data(INCA_data, eDAQ_data):
@@ -243,11 +243,11 @@ def sync_data(INCA_data, eDAQ_data):
     eDAQ_mdata = eDAQ_data.copy()
 
     # find first time pedal goes logical high in both.
-    inca_pedal_high_start_i = INCA_data['pedal_sw'].index(1)
-    inca_pedal_high_start_t = INCA_data['time'][inca_pedal_high_start_i]
+    inca_pedal_high_start_i = INCA_data["pedal_sw"].index(1)
+    inca_pedal_high_start_t = INCA_data["time"][inca_pedal_high_start_i]
 
-    edaq_pedal_high_start_i = eDAQ_data['pedal_sw'].index(1)
-    edaq_pedal_high_start_t = eDAQ_data['time'][edaq_pedal_high_start_i]
+    edaq_pedal_high_start_i = eDAQ_data["pedal_sw"].index(1)
+    edaq_pedal_high_start_t = eDAQ_data["time"][edaq_pedal_high_start_i]
     print("\nINCA first pedal high: %f" % inca_pedal_high_start_t)
     print("eDAQ first pedal high: %f" % edaq_pedal_high_start_t)
 
@@ -256,7 +256,7 @@ def sync_data(INCA_data, eDAQ_data):
         # remove time from beginning of INCA file
         print("Removing data from beginning of INCA channels.")
         match_time_index = find_closest(edaq_pedal_high_start_t,
-                                                            INCA_data['time'])
+                                                            INCA_data["time"])
         index_offset = inca_pedal_high_start_i - match_time_index
 
         # this is where the duplicate dict comes in handy.
@@ -268,17 +268,17 @@ def sync_data(INCA_data, eDAQ_data):
         # Has to be done in two places because this one doesn't always happen
         # (if eDAQ file is the one that gets modified in this function).
         # And after subtraction, zero point is thrown off again.
-        start_time = INCA_data['time'][0]
-        new_start_time = INCA_mdata['time'][0]
-        INCA_mdata['time'] = [x - (new_start_time - start_time)
-                                                    for x in INCA_mdata['time']]
+        start_time = INCA_data["time"][0]
+        new_start_time = INCA_mdata["time"][0]
+        INCA_mdata["time"] = [x - (new_start_time - start_time)
+                                                    for x in INCA_mdata["time"]]
         # https://stackoverflow.com/questions/4918425/subtract-a-value-from-every-number-in-a-list-in-python
 
     else:
         # remove time from beginning of eDAQ file
         print("Removing data from beginning of eDAQ channels.")
         match_time_index = find_closest(inca_pedal_high_start_t,
-                                                            eDAQ_data['time'])
+                                                            eDAQ_data["time"])
         index_offset = edaq_pedal_high_start_i - match_time_index
 
         # this is where the duplicate dict comes in handy.
@@ -286,18 +286,18 @@ def sync_data(INCA_data, eDAQ_data):
             eDAQ_mdata[k] = eDAQ_data[k][index_offset:]
             # Offset time values to still start at zero
             # necessary because streams doesn't necessarily start at time 0 (dumb)
-            start_time = eDAQ_data['time'][0]
-            new_start_time = eDAQ_mdata['time'][0]
-            eDAQ_mdata['time'] = [x - (new_start_time - start_time)
-                                                    for x in eDAQ_mdata['time']]
+            start_time = eDAQ_data["time"][0]
+            new_start_time = eDAQ_mdata["time"][0]
+            eDAQ_mdata["time"] = [x - (new_start_time - start_time)
+                                                    for x in eDAQ_mdata["time"]]
 
 
     # Now print new pedal-high times as a check
-    inca_pedal_high_start_i = INCA_mdata['pedal_sw'].index(1)
-    inca_pedal_high_start_t = INCA_mdata['time'][inca_pedal_high_start_i]
+    inca_pedal_high_start_i = INCA_mdata["pedal_sw"].index(1)
+    inca_pedal_high_start_t = INCA_mdata["time"][inca_pedal_high_start_i]
 
-    edaq_pedal_high_start_i = eDAQ_mdata['pedal_sw'].index(1)
-    edaq_pedal_high_start_t = eDAQ_mdata['time'][edaq_pedal_high_start_i]
+    edaq_pedal_high_start_i = eDAQ_mdata["pedal_sw"].index(1)
+    edaq_pedal_high_start_t = eDAQ_mdata["time"][edaq_pedal_high_start_i]
 
     print("\nSynced INCA first pedal high: %f" % inca_pedal_high_start_t)
     print("Synced eDAQ first pedal high: %f" % edaq_pedal_high_start_t)
@@ -305,25 +305,52 @@ def sync_data(INCA_data, eDAQ_data):
     return INCA_mdata, eDAQ_mdata
 
 
-def write_sync_data(run_num):
-    pass
+def transpose_data_lists(data_dict):
+    """Reformats data dict into transposed list of lists"""
+    # Take all data lists stored in dictionary by channel name and create
+    # list of lists to use in writing output file.
+    array = []
+    for key in data_dict:
+        array.append(data_dict[key])
+
+        # Now need to transpose array to match output file format.
+        array_t = list(map(list, zip(*array)))
+        # https://stackoverflow.com/questions/6473679/transpose-list-of-lists
+
+    return array_t
+
+
+def write_sync_data(INCA_data, eDAQ_data, INCA_headers, eDAQ_headers,
+                                                                full_run_num):
+    """Writes data to file, labeled with run number."""
+
+    INCA_array_t = transpose_data_lists(INCA_data)
+    eDAQ_array_t = transpose_data_lists(eDAQ_data)
+
+    # print(INCA_array_t[289:292][:]) # debug
+
+
+
 
 run_num, INCA_data_path, eDAQ_data_path = path_find()
-# print(run_num) # debug
+
 print("\t%s" % INCA_data_path) # debug
 print("\t%s\n" % eDAQ_data_path) # debug
 
 # as written, eDAQ file will have to be repeatedly opened and read for each
 # separate INCA run. If this ends up too slow, program can be re-written a
 # different way. It's probably fine now though.
-# INCA_data_list, INCA_data, eDAQ_data_list, eDAQ_data = data_read(INCA_data_path,
-#                                                         eDAQ_data_path, run_num)
-INCA_data, eDAQ_data = data_read(INCA_data_path, eDAQ_data_path, run_num)
+INCA_headers, eDAQ_headers, INCA_data, eDAQ_data = data_read(INCA_data_path,
+                                                        eDAQ_data_path, run_num)
 
 INCA_mdata, eDAQ_mdata = sync_data(INCA_data, eDAQ_data)
 
+write_sync_data(INCA_mdata, eDAQ_mdata, INCA_headers, eDAQ_headers, run_num)
 
 # Write function to write synced data. Will make further testing easier.
+# need to recover headers.
+
+
 
 # Delete useless data before the first pedal actuation
 # Keep first time value = 0
@@ -336,17 +363,11 @@ INCA_mdata, eDAQ_mdata = sync_data(INCA_data, eDAQ_data)
 
 
 # debug
-# print(INCA_data_list[0][2])
-# print(INCA_data_list[1][1])
-# print(INCA_data_list[7][0])
-# print(eDAQ_data_list[0][2])
-# print(eDAQ_data_list[1][1])
-# print(eDAQ_data_list[7][0])
-# print(INCA_data_dict['throttle'][38])
-# print(INCA_data_dict['engine_spd'][315])
-# print(INCA_data_dict['pedal_sw'][305])
-# print(INCA_data_dict['pedal_sw'][306])
-# print(eDAQ_data_dict['gnd_speed'][0])
-# print(eDAQ_data_dict['gnd_speed'][1])
-# print(eDAQ_data_dict['pedal_sw'][630])
-# print(eDAQ_data_dict['pedal_sw'][631])
+# print(INCA_data_dict["throttle"][38])
+# print(INCA_data_dict["engine_spd"][315])
+# print(INCA_data_dict["pedal_sw"][305])
+# print(INCA_data_dict["pedal_sw"][306])
+# print(eDAQ_data_dict["gnd_speed"][0])
+# print(eDAQ_data_dict["gnd_speed"][1])
+# print(eDAQ_data_dict["pedal_sw"][630])
+# print(eDAQ_data_dict["pedal_sw"][631])
