@@ -160,7 +160,19 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
         # https://stackoverflow.com/questions/7856296/parsing-csv-tab-delimited-txt-file-with-python
 
         for i, INCA_row in enumerate(INCA_file_in):
+            if i == 5:
+                # first row of actual data - contains first time value.
+                # if it's nonzero, need to force it there then offset all future
+                # time values. Done in next if block.
+                inca_time_offset = float(INCA_row[0])
+            # using if instead of elif here because I need both if statements to
+            # run in the case of i == 5. if/elif blocks are mutually exclusive.
             if i >= 5:
+                # shift time vector to start at zero.
+                # row has all strings, so have to convert back and forth.
+                # Might lose some precision doing this, but it will be negligible.
+                INCA_row[0] = str(float(INCA_row[0]) - inca_time_offset)
+
                 INCA_data_list.append(INCA_row)
 
                 INCA_data_dict['time'].append(float(INCA_row[0]))
@@ -237,7 +249,11 @@ def sync_data(INCA_data, eDAQ_data):
         for k in INCA_data:
             INCA_mdata[k] = INCA_data[k][index_offset:]
         # Offset time values to still start at zero
-        start_time = INCA_data['time'][0] # necessary because streams doesn't necessarily start at time 0 (dumb)
+        # necessary because offset stream doesn't necessarily yield start time of 0.
+        # has to be done in two places because this one doesn't always happen (if eDAQ file is
+        # the one that gets modified in this function). And after subtraction, zero point
+        # is thrown off again.
+        start_time = INCA_data['time'][0]
         new_start_time = INCA_mdata['time'][0]
         INCA_mdata['time'] = [x - (new_start_time-start_time) for x in INCA_mdata['time']]
         # https://stackoverflow.com/questions/4918425/subtract-a-value-from-every-number-in-a-list-in-python
@@ -281,6 +297,8 @@ INCA_data_list, INCA_data, eDAQ_data_list, eDAQ_data = data_read(INCA_data_path,
 
 INCA_mdata, eDAQ_mdata = sync_data(INCA_data, eDAQ_data)
 
+
+# Write function to write synced data. Will make further testing easier.
 
 # Delete useless data before the first pedal actuation
 # Keep first time value = 0
