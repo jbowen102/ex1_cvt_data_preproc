@@ -94,8 +94,8 @@ def run_name_parse(filename):
     """Assuming INCA data type
     Returns run number."""
 
-    run_num = filename.split("_")[1][0:4]
-    return run_num
+    run_num_text = filename.split("_")[1][0:4]
+    return run_num_text
 
 
 def find_edaq_col_offset(header_row, sub_run_num):
@@ -139,9 +139,9 @@ def find_closest(t_val, t_list):
             smallest_diff = diff
             time_index = i
 
-    print("Value in t_list closest to t_val (%f): %f" %
+    print("\tValue in t_list closest to t_val (%f): %f" %
                                                     (t_val, t_list[time_index]))
-    print("Index of t_list with value closest to t_val (%f): %d" %
+    print("\tIndex of t_list with value closest to t_val (%f): %d" %
                                                             (t_val, time_index))
 
     # Closest val should never be farther than half the lowest sampling rate.
@@ -253,13 +253,13 @@ def sync_data(INCA_data, eDAQ_data):
 
     edaq_pedal_high_start_i = eDAQ_data["pedal_sw"].index(1)
     edaq_pedal_high_start_t = eDAQ_data["time"][edaq_pedal_high_start_i]
-    print("\nINCA first pedal high: %f" % inca_pedal_high_start_t)
-    print("eDAQ first pedal high: %f" % edaq_pedal_high_start_t)
+    print("\n\tINCA first pedal high: %f" % inca_pedal_high_start_t)
+    print("\teDAQ first pedal high: %f" % edaq_pedal_high_start_t)
 
 
     if inca_pedal_high_start_t > edaq_pedal_high_start_t:
         # remove time from beginning of INCA file
-        print("Removing data from beginning of INCA channels.")
+        print("\tRemoving data from beginning of INCA channels.")
         match_time_index = find_closest(edaq_pedal_high_start_t,
                                                             INCA_data["time"])
         index_offset = inca_pedal_high_start_i - match_time_index
@@ -281,7 +281,7 @@ def sync_data(INCA_data, eDAQ_data):
 
     else:
         # remove time from beginning of eDAQ file
-        print("Removing data from beginning of eDAQ channels.")
+        print("\tRemoving data from beginning of eDAQ channels.")
         match_time_index = find_closest(inca_pedal_high_start_t,
                                                             eDAQ_data["time"])
         index_offset = edaq_pedal_high_start_i - match_time_index
@@ -304,8 +304,8 @@ def sync_data(INCA_data, eDAQ_data):
     edaq_pedal_high_start_i = eDAQ_mdata["pedal_sw"].index(1)
     edaq_pedal_high_start_t = eDAQ_mdata["time"][edaq_pedal_high_start_i]
 
-    print("Synced INCA first pedal high: %f" % inca_pedal_high_start_t)
-    print("Synced eDAQ first pedal high: %f" % edaq_pedal_high_start_t)
+    print("\tSynced INCA first pedal high: %f" % inca_pedal_high_start_t)
+    print("\tSynced eDAQ first pedal high: %f" % edaq_pedal_high_start_t)
 
     return INCA_mdata, eDAQ_mdata
 
@@ -349,7 +349,7 @@ def combine_data_arrays(INCA_array, eDAQ_array):
 
 
 def write_sync_data(INCA_data, eDAQ_data, INCA_headers, eDAQ_headers,
-                                                                full_run_num):
+                                            full_run_num, auto_overwrite=False):
     """Writes data to file, labeled with run number."""
 
     # Create reformatted arrays of just channel data (no headers)
@@ -370,7 +370,7 @@ def write_sync_data(INCA_data, eDAQ_data, INCA_headers, eDAQ_headers,
     sync_filename = "./sync_data/%s" % sync_basename
 
     # Check if file exists already. Prompt user for overwrite decision.
-    if os.path.exists(sync_filename):
+    if os.path.exists(sync_filename) and not auto_overwrite:
         ow_answer = ""
         while ow_answer.lower() not in ["y", "n"]:
             ow_answer = input("\n%s already exists in sync_data folder. "
@@ -384,43 +384,67 @@ def write_sync_data(INCA_data, eDAQ_data, INCA_headers, eDAQ_headers,
 
         print("\nWriting combined data to %s..." % sync_basename)
         sync_file_csv.writerows(sync_array)
-        print("...done")
+        print("...done\n")
 
-auto_spec = sys.argv
-if auto_spec:
-    print("inside auto")
-    pass
-# else:
+# If you pass in any arguments from the command line after "python run.py",
+# This pulls them in. If "auto" specified, process all data.
+# If second arg is "over", then automatically overwrite any existing exports in
+# the ./sync_data folder.
+autorun_arg = False # initializing for later conditional
+if len(sys.argv) == 2:
+    prog, autorun_arg = sys.argv
+    overw_arg = False
+    # print(autorun_arg)
+elif len(sys.argv) == 3:
+    prog, autorun_arg, overw_arg = sys.argv
+    # print(autorun_arg)
+    # print(overw_arg)
 
-# run with user input for specific run to use
-run_num, INCA_data_path, eDAQ_data_path = path_find()
+if autorun_arg is str and autorun_arg.lower() == "auto":
+    # loop through ordered contents of ./raw_data/INCA and process each run.
+    INCA_root = "./raw_data/INCA/"
+    INCA_files = os.listdir(INCA_root)
+    INCA_files.sort()
+    for INCA_file in INCA_files:
+        INCA_run = run_name_parse(INCA_file)
+        run_num, INCA_data_path, eDAQ_data_path = path_find(INCA_run)
+        # as written, eDAQ file will have to be repeatedly opened and read for
+        # each separate INCA run. If this ends up too slow, program can be
+        # re-written a different way. It's probably fine now though.
+        INCA_headers, eDAQ_headers, INCA_data, eDAQ_data = data_read(
+                                    INCA_data_path, eDAQ_data_path, run_num)
 
-print("\t%s" % INCA_data_path) # debug
-print("\t%s\n" % eDAQ_data_path) # debug
+        INCA_mdata, eDAQ_mdata = sync_data(INCA_data, eDAQ_data)
 
-# as written, eDAQ file will have to be repeatedly opened and read for each
-# separate INCA run. If this ends up too slow, program can be re-written a
-# different way. It's probably fine now though.
-INCA_headers, eDAQ_headers, INCA_data, eDAQ_data = data_read(INCA_data_path,
-                                                        eDAQ_data_path, run_num)
+        # If "over" specified, automatically overwrite destination files.
+        if overw_arg is str and overw_arg.lower() == "over":
+            auto_overwrite = True
+        else:
+            auto_overwrite = False
 
-INCA_mdata, eDAQ_mdata = sync_data(INCA_data, eDAQ_data)
+        write_sync_data(INCA_mdata, eDAQ_mdata, INCA_headers, eDAQ_headers,
+                                                        run_num, auto_overwrite)
 
-write_sync_data(INCA_mdata, eDAQ_mdata, INCA_headers, eDAQ_headers, run_num)
+else:
+    # run with user input for specific run to use
+    run_num, INCA_data_path, eDAQ_data_path = path_find()
 
-# Write function to write synced data. Will make further testing easier.
-# need to recover headers.
+    print("\t%s" % INCA_data_path) # debug
+    print("\t%s\n" % eDAQ_data_path) # debug
 
+    INCA_headers, eDAQ_headers, INCA_data, eDAQ_data = data_read(
+                                        INCA_data_path, eDAQ_data_path, run_num)
+
+    INCA_mdata, eDAQ_mdata = sync_data(INCA_data, eDAQ_data)
+
+    write_sync_data(INCA_mdata, eDAQ_mdata, INCA_headers, eDAQ_headers,
+                                                                        run_num)
 
 
 # Delete useless data before the first pedal actuation
 # Keep first time value = 0
-# truncate_data(INCA_mdata, eDAQ_mdata)
 
-
-
-
-
+# Delete useless data between events.
 
 
 # debug
