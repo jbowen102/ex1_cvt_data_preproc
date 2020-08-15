@@ -1,3 +1,4 @@
+import sys
 import os
 import wpfix
 import csv
@@ -35,19 +36,23 @@ def path_intake(data_type):
         return data_path
 
 
-def path_find():
-    """Data type should be 'eDAQ" or 'INCA'
-    Returns correctly-formatted file path string."""
-    user_run_num = input("Enter run num (four digits)\n> ")
-    if len(user_run_num) < 4:
-        raise FilenameError("Need a four-digit number")
+def path_find(target_run_num=False):
+    """Finds both file paths for either a user-specified run number or given
+    run number"""
+
+    if not target_run_num:
+        # No input passed so prompt user for run num.
+        run_prompt = "Enter run num (four digits)\n> "
+        target_run_num = input(run_prompt)
+        while len(target_run_num) != 4:
+            target_run_num = input("Need a four-digit number. %s" % run_prompt)
 
     inca_dir = "./raw_data/INCA/"
     all_inca_runs = os.listdir(inca_dir)
     found_inca = False # initialize to false. Will change if file is found.
     for inca_run in all_inca_runs:
         run_num_i = run_name_parse(inca_run)
-        if run_num_i == user_run_num:
+        if run_num_i == target_run_num:
             # break out of look while "inca_run" is set to correct filename
             found_inca = True
             break
@@ -55,13 +60,13 @@ def path_find():
     if found_inca:
         INCA_data_path = os.path.join(inca_dir, inca_run) # relative path
     else:
-        raise FilenameError("No INCA file found for run %s" % user_run_num)
+        raise FilenameError("No INCA file found for run %s" % target_run_num)
 
     if not os.path.exists(INCA_data_path):
         raise FilenameError("Bad path: %s" % INCA_data_path)
 
     # Now use that run number to find the right eDAQ file
-    eDAQ_file_num = user_run_num[0:2]
+    eDAQ_file_num = target_run_num[0:2]
 
     eDAQ_dir = "./raw_data/eDAQ/"
     all_eDAQ_runs = os.listdir(eDAQ_dir)
@@ -82,7 +87,7 @@ def path_find():
     if not os.path.exists(eDAQ_data_path):
         raise FilenameError("Bad path: %s" % eDAQ_data_path)
 
-    return user_run_num, INCA_data_path, eDAQ_data_path
+    return target_run_num, INCA_data_path, eDAQ_data_path
 
 
 def run_name_parse(filename):
@@ -160,14 +165,14 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
     # Open file with read priveleges.
     # File automatically closed at end of "with/as" block.
     with open(INCA_path, "r") as inca_ascii_file:
-        print("Reading INCA data from ASCII...") # debug
+        print("Reading INCA data from %s" % INCA_data_path) # debug
         INCA_file_in = csv.reader(inca_ascii_file, delimiter="\t")
         # https://stackoverflow.com/questions/7856296/parsing-csv-tab-delimited-txt-file-with-python
 
         # Save headers so we can use them when exporting synced data.
         INCA_headers = []
         for i, INCA_row in enumerate(INCA_file_in):
-            if i < 5:
+            if i == 2 or i == 4:
                 INCA_headers.append(INCA_row)
             if i == 5:
                 # first row of actual data - contains first time value.
@@ -191,7 +196,7 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
 
     # now read eDAQ data
     with open(eDAQ_path, "r") as edaq_ascii_file:
-        print("Reading eDAQ data from ASCII...") # debug
+        print("Reading eDAQ data from %s" % eDAQ_data_path) # debug
         eDAQ_file_in = csv.reader(edaq_ascii_file, delimiter="\t")
         # https://stackoverflow.com/questions/7856296/parsing-csv-tab-delimited-txt-file-with-python
 
@@ -226,8 +231,8 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
                                             float(eDAQ_row[run_start_col+2]))
     print("...done")
 
-    print(INCA_headers)
-    print(eDAQ_headers)
+    # print(INCA_headers) # debug
+    # print(eDAQ_headers) # debug
 
     return INCA_headers, eDAQ_headers, INCA_data_dict, eDAQ_data_dict
 
@@ -299,7 +304,7 @@ def sync_data(INCA_data, eDAQ_data):
     edaq_pedal_high_start_i = eDAQ_mdata["pedal_sw"].index(1)
     edaq_pedal_high_start_t = eDAQ_mdata["time"][edaq_pedal_high_start_i]
 
-    print("\nSynced INCA first pedal high: %f" % inca_pedal_high_start_t)
+    print("Synced INCA first pedal high: %f" % inca_pedal_high_start_t)
     print("Synced eDAQ first pedal high: %f" % edaq_pedal_high_start_t)
 
     return INCA_mdata, eDAQ_mdata
@@ -320,18 +325,74 @@ def transpose_data_lists(data_dict):
     return array_t
 
 
+def combine_data_arrays(INCA_array, eDAQ_array):
+    """Takes two data arrays and returns combined array.
+    """
+    # Base it off longer file so no data gets cut off.
+
+    if len(INCA_array) > len(eDAQ_array):
+        sync_array = INCA_array[:]
+        for line_no, line in enumerate(eDAQ_array):
+            # for line_no in range(len(ECU_data_mlist)):
+            sync_array[line_no].append("")
+            sync_array[line_no] += line
+            # sync_array[line_no] += tuple(ECU_data_mlist[line_no])
+    else:
+        sync_array = eDAQ_array[:]
+        for line_no, line in enumerate(INCA_array):
+            # for line_no in range(len(ECU_data_mlist)):
+            sync_array[line_no].append("")
+            sync_array[line_no] += line
+            # sync_array[line_no] += tuple(ECU_data_mlist[line_no])
+
+    return sync_array
+
+
 def write_sync_data(INCA_data, eDAQ_data, INCA_headers, eDAQ_headers,
                                                                 full_run_num):
     """Writes data to file, labeled with run number."""
 
-    INCA_array_t = transpose_data_lists(INCA_data)
-    eDAQ_array_t = transpose_data_lists(eDAQ_data)
+    # Create reformatted arrays of just channel data (no headers)
+    INCA_ch_array_t = transpose_data_lists(INCA_data)
+    eDAQ_ch_array_t = transpose_data_lists(eDAQ_data)
 
+    # Add in headers
+    # eDAQ gets padding to line up first data row with INCA format.
+    INCA_array_t = INCA_headers + INCA_ch_array_t
+    eDAQ_array_t = eDAQ_headers + [["", "", ""]] + eDAQ_ch_array_t
+
+    # Create unified array with both datasets
+    sync_array = combine_data_arrays(INCA_array_t, eDAQ_array_t)
     # print(INCA_array_t[289:292][:]) # debug
 
+    # Create new CSV file and write out. Closes automatically at end of with/as
+    sync_basename = "%s_Sync.csv" % full_run_num
+    sync_filename = "./sync_data/%s" % sync_basename
 
+    # Check if file exists already. Prompt user for overwrite decision.
+    if os.path.exists(sync_filename):
+        ow_answer = ""
+        while ow_answer.lower() not in ["y", "n"]:
+            ow_answer = input("\n%s already exists in sync_data folder. "
+                                "Overwrite? (Y/N)\n> " % sync_basename)
+        if ow_answer.lower() == "n":
+            return
 
+    # This block should not run if answered no to overwrite above.
+    with open(sync_filename, 'w+') as sync_file:
+        sync_file_csv = csv.writer(sync_file, dialect="excel")
 
+        print("\nWriting combined data to %s..." % sync_basename)
+        sync_file_csv.writerows(sync_array)
+        print("...done")
+
+auto_spec = sys.argv
+if auto_spec:
+    print("inside auto")
+    pass
+# else:
+
+# run with user input for specific run to use
 run_num, INCA_data_path, eDAQ_data_path = path_find()
 
 print("\t%s" % INCA_data_path) # debug
