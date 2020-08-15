@@ -237,22 +237,32 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
     return INCA_headers, eDAQ_headers, INCA_data_dict, eDAQ_data_dict
 
 
+def find_first_pedal_high(data_dict):
+    """Finds first time in a data stream that the "pedal_sw" channel goes from
+    0 to 1."""
+
+    high_start_i = data_dict["pedal_sw"].index(1)
+    high_start_t = data_dict["time"][high_start_i]
+    return high_start_i, high_start_t
+
+
 def sync_data(INCA_data, eDAQ_data):
     """
     Takes in two dicts of data.
     Syncs data based on matching the first time the pedal switch goes high.
     Returns two dicts containing lists of synced data.
     """
+
+    # Creete new dict objects to hold modified data.
     # copy() needed to prevent unwanted side effects / aliasing.
     INCA_mdata = INCA_data.copy()
     eDAQ_mdata = eDAQ_data.copy()
 
     # find first time pedal goes logical high in both.
-    inca_pedal_high_start_i = INCA_data["pedal_sw"].index(1)
-    inca_pedal_high_start_t = INCA_data["time"][inca_pedal_high_start_i]
-
-    edaq_pedal_high_start_i = eDAQ_data["pedal_sw"].index(1)
-    edaq_pedal_high_start_t = eDAQ_data["time"][edaq_pedal_high_start_i]
+    inca_pedal_high_start_i, inca_pedal_high_start_t = find_first_pedal_high(
+                                                                      INCA_data)
+    edaq_pedal_high_start_i, edaq_pedal_high_start_t = find_first_pedal_high(
+                                                                      eDAQ_data)
     print("\n\tINCA first pedal high: %f" % inca_pedal_high_start_t)
     print("\teDAQ first pedal high: %f" % edaq_pedal_high_start_t)
 
@@ -264,8 +274,7 @@ def sync_data(INCA_data, eDAQ_data):
                                                             INCA_data["time"])
         index_offset = inca_pedal_high_start_i - match_time_index
 
-        # this is where the duplicate dict comes in handy.
-
+        # this is where the separate, new dict comes in handy.
         for k in INCA_data:
             INCA_mdata[k] = INCA_data[k][index_offset:]
         # Offset time values to still start at zero. Necessary because offset
@@ -286,11 +295,11 @@ def sync_data(INCA_data, eDAQ_data):
                                                             eDAQ_data["time"])
         index_offset = edaq_pedal_high_start_i - match_time_index
 
-        # this is where the duplicate dict comes in handy.
+        # this is where the separate, new dict comes in handy.
         for k in eDAQ_data:
             eDAQ_mdata[k] = eDAQ_data[k][index_offset:]
             # Offset time values to still start at zero
-            # necessary because streams doesn't necessarily start at time 0 (dumb)
+            # necessary because streams doesn't necessarily start at time 0
             start_time = eDAQ_data["time"][0]
             new_start_time = eDAQ_mdata["time"][0]
             eDAQ_mdata["time"] = [x - (new_start_time - start_time)
@@ -298,16 +307,41 @@ def sync_data(INCA_data, eDAQ_data):
 
 
     # Now print new pedal-high times as a check
-    inca_pedal_high_start_i = INCA_mdata["pedal_sw"].index(1)
-    inca_pedal_high_start_t = INCA_mdata["time"][inca_pedal_high_start_i]
-
-    edaq_pedal_high_start_i = eDAQ_mdata["pedal_sw"].index(1)
-    edaq_pedal_high_start_t = eDAQ_mdata["time"][edaq_pedal_high_start_i]
-
+    inca_pedal_high_start_i, inca_pedal_high_start_t = find_first_pedal_high(
+                                                                     INCA_mdata)
+    edaq_pedal_high_start_i, edaq_pedal_high_start_t = find_first_pedal_high(
+                                                                     eDAQ_mdata)
     print("\tSynced INCA first pedal high: %f" % inca_pedal_high_start_t)
     print("\tSynced eDAQ first pedal high: %f" % edaq_pedal_high_start_t)
 
     return INCA_mdata, eDAQ_mdata
+
+
+def left_trim_data(data_dict):
+    """Isolates important events in data by removing any parts where the
+    throttle isn't open >40% for >1 second."""
+
+    data_mdict = data_dict.copy()
+
+    pedal_high_start_i, pedal_high_start_t = find_first_pedal_high(data_dict)
+    if pedal_high_start_t > 0.5:
+        match_time_index = find_closest(pedal_high_start_t - 0.5,
+                                                            data_dict["time"])
+
+        # Transcribe data from each channel starting at this -0.5s mark.
+        for k in data_dict:
+            data_mdict[k] = data_dict[k][match_time_index:]
+
+        # offset the start time to still be zero.
+        new_start_time = data_mdict["time"][0]
+        data_mdict["time"] = [x - new_start_time for x in data_mdict["time"]]
+
+    else:
+        # Don't remove any data if there's already less than a half second
+        # before first pedal actuation.
+        pass
+
+    return data_mdict
 
 
 def transpose_data_lists(data_dict):
@@ -329,7 +363,6 @@ def combine_data_arrays(INCA_array, eDAQ_array):
     """Takes two data arrays and returns combined array.
     """
     # Base it off longer file so no data gets cut off.
-
     if len(INCA_array) > len(eDAQ_array):
         sync_array = INCA_array[:]
         for line_no, line in enumerate(eDAQ_array):
@@ -386,6 +419,7 @@ def write_sync_data(INCA_data, eDAQ_data, INCA_headers, eDAQ_headers,
         sync_file_csv.writerows(sync_array)
         print("...done\n")
 
+
 # If you pass in any arguments from the command line after "python run.py",
 # This pulls them in. If "auto" specified, process all data.
 # If second arg is "over", then automatically overwrite any existing exports in
@@ -400,7 +434,7 @@ elif len(sys.argv) == 3:
     # print(autorun_arg)
     # print(overw_arg)
 
-if autorun_arg is str and autorun_arg.lower() == "auto":
+if type(autorun_arg) is str and autorun_arg.lower() == "auto":
     # loop through ordered contents of ./raw_data/INCA and process each run.
     INCA_root = "./raw_data/INCA/"
     INCA_files = os.listdir(INCA_root)
@@ -416,13 +450,16 @@ if autorun_arg is str and autorun_arg.lower() == "auto":
 
         INCA_mdata, eDAQ_mdata = sync_data(INCA_data, eDAQ_data)
 
+        INCA_mtdata = left_trim_data(INCA_mdata)
+        eDAQ_mtdata = left_trim_data(eDAQ_mdata)
+
         # If "over" specified, automatically overwrite destination files.
-        if overw_arg is str and overw_arg.lower() == "over":
+        if type(overw_arg) is str and overw_arg.lower() == "over":
             auto_overwrite = True
         else:
             auto_overwrite = False
 
-        write_sync_data(INCA_mdata, eDAQ_mdata, INCA_headers, eDAQ_headers,
+        write_sync_data(INCA_mtdata, eDAQ_mtdata, INCA_headers, eDAQ_headers,
                                                         run_num, auto_overwrite)
 
 else:
@@ -437,7 +474,10 @@ else:
 
     INCA_mdata, eDAQ_mdata = sync_data(INCA_data, eDAQ_data)
 
-    write_sync_data(INCA_mdata, eDAQ_mdata, INCA_headers, eDAQ_headers,
+    INCA_mtdata = left_trim_data(INCA_mdata)
+    eDAQ_mtdata = left_trim_data(eDAQ_mdata)
+
+    write_sync_data(INCA_mtdata, eDAQ_mtdata, INCA_headers, eDAQ_headers,
                                                                         run_num)
 
 
@@ -445,6 +485,9 @@ else:
 # Keep first time value = 0
 
 # Delete useless data between events.
+
+# Plot data to determine if trimming is correct.
+
 
 
 # debug
