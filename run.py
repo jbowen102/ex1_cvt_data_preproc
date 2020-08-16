@@ -157,7 +157,8 @@ def find_closest(t_val, t_list):
 def data_read(INCA_path, eDAQ_path, run_num_text):
     sub_run_num = int(run_num_text[2:4])
 
-    INCA_data_dict = {"time": [],
+    INCA_data_dict = {"HEADERS": [],
+                      "time": [],
                       "pedal_sw": [],
                       "engine_spd": [],
                       "throttle": []}
@@ -171,11 +172,10 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
         INCA_file_in = csv.reader(inca_ascii_file, delimiter="\t")
         # https://stackoverflow.com/questions/7856296/parsing-csv-tab-delimited-txt-file-with-python
 
-        # Save headers so we can use them when exporting synced data.
-        INCA_headers = []
         for i, INCA_row in enumerate(INCA_file_in):
             if i == 2 or i == 4:
-                INCA_headers.append(INCA_row)
+                # Save headers so we can use them when exporting synced data.
+                INCA_data_dict["HEADERS"].append(INCA_row)
             if i == 5:
                 # first row of actual data - contains first time value.
                 # if it's nonzero, need to force it there then offset all future
@@ -192,7 +192,8 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
                 INCA_data_dict["throttle"].append(float(INCA_row[3]))
     print("...done")
 
-    eDAQ_data_dict = {"time": [],
+    eDAQ_data_dict = {"HEADERS": [],
+                      "time": [],
                       "gnd_speed": [],
                       "pedal_sw": []}
 
@@ -202,8 +203,6 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
         eDAQ_file_in = csv.reader(edaq_ascii_file, delimiter="\t")
         # https://stackoverflow.com/questions/7856296/parsing-csv-tab-delimited-txt-file-with-python
 
-        # Save headers so we can use them when exporting synced data.
-        eDAQ_headers = []
         for j, eDAQ_row in enumerate(eDAQ_file_in):
             if j == 0:
                 # The first row is a list of channel names.
@@ -214,7 +213,7 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
                 # Save headers so we can use them when exporting synced data.
                 # Not reading in the first channel eDAQ_row[run_start_col]
                 # because it's pedal voltage and not needed.
-                eDAQ_headers.append([eDAQ_row[0]] +
+                eDAQ_data_dict["HEADERS"].append([eDAQ_row[0]] +
                                     eDAQ_row[run_start_col+1:run_start_col+3])
             elif j > 0:
                 # Only add this run's channels to our data list.
@@ -233,10 +232,7 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
                                             float(eDAQ_row[run_start_col+2]))
     print("...done")
 
-    # print(INCA_headers) # debug
-    # print(eDAQ_headers) # debug
-
-    return INCA_headers, eDAQ_headers, INCA_data_dict, eDAQ_data_dict
+    return INCA_data_dict, eDAQ_data_dict
 
 
 def find_first_pedal_high(data_dict):
@@ -445,10 +441,10 @@ def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
     print(valid_event_times_c)
 
     # duplicate data structure
-
     INCA_data_a = INCA_data.copy()
 
-    # offset INCA time vector to maintain continuity.
+    # shift time values to maintain continuity.
+
     # find closest times in eDAQ files.
 
     # make sure everything works in case of only one valid range (ex. 0105)
@@ -463,6 +459,9 @@ def transpose_data_lists(data_dict):
     # list of lists to use in writing output file.
     array = []
     for key in data_dict:
+        if key == "HEADERS":
+            # ignore headers
+            continue
         array.append(data_dict[key])
 
         # Now need to transpose array to match output file format.
@@ -491,8 +490,7 @@ def combine_data_arrays(INCA_array, eDAQ_array):
     return sync_array
 
 
-def write_sync_data(INCA_data, eDAQ_data, INCA_headers, eDAQ_headers,
-                                            full_run_num, auto_overwrite=False):
+def write_sync_data(INCA_data, eDAQ_data, full_run_num, auto_overwrite=False):
     """Writes data to file, labeled with run number."""
 
     # Create reformatted arrays of just channel data (no headers)
@@ -501,8 +499,8 @@ def write_sync_data(INCA_data, eDAQ_data, INCA_headers, eDAQ_headers,
 
     # Add in headers
     # eDAQ gets padding to line up first data row with INCA format.
-    INCA_array_t = INCA_headers + INCA_ch_array_t
-    eDAQ_array_t = eDAQ_headers + [["", "", ""]] + eDAQ_ch_array_t
+    INCA_array_t = INCA_data["HEADERS"] + INCA_ch_array_t
+    eDAQ_array_t = eDAQ_data["HEADERS"] + [["", "", ""]] + eDAQ_ch_array_t
 
     # Create unified array with both datasets
     sync_array = combine_data_arrays(INCA_array_t, eDAQ_array_t)
@@ -561,8 +559,8 @@ def main_prog():
             # as written, eDAQ file will have to be repeatedly opened and read
             # for each separate INCA run. If this ends up too slow, program can
             # be re-written a different way. It's probably fine now though.
-            INCA_headers, eDAQ_headers, INCA_data, eDAQ_data = data_read(
-                                        INCA_data_path, eDAQ_data_path, run_num)
+            INCA_data, eDAQ_data = data_read(INCA_data_path, eDAQ_data_path,
+                                                                        run_num)
 
             INCA_mdata, eDAQ_mdata = sync_data(INCA_data, eDAQ_data)
 
@@ -578,8 +576,8 @@ def main_prog():
             else:
                 auto_overwrite = False
 
-            write_sync_data(INCA_mtdata, eDAQ_mtdata, INCA_headers,
-                                        eDAQ_headers, run_num, auto_overwrite)
+            write_sync_data(INCA_data_mta, eDAQ_data_mta, run_num,
+                                                                auto_overwrite)
 
     else:
         # run with user input for specific run to use
@@ -588,8 +586,8 @@ def main_prog():
         print("\t%s" % INCA_data_path) # debug
         print("\t%s\n" % eDAQ_data_path) # debug
 
-        INCA_headers, eDAQ_headers, INCA_data, eDAQ_data = data_read(
-                                        INCA_data_path, eDAQ_data_path, run_num)
+        INCA_data, eDAQ_data = data_read(INCA_data_path, eDAQ_data_path,
+                                                                        run_num)
 
         INCA_mdata, eDAQ_mdata = sync_data(INCA_data, eDAQ_data)
 
@@ -599,17 +597,13 @@ def main_prog():
         INCA_data_mta, eDAQ_data_mta = abbreviate_data(INCA_mtdata,
                 eDAQ_mtdata, throttle_threshold, throttle_time_threshold)
         quit()
-        write_sync_data(INCA_mtdata, eDAQ_mtdata, INCA_headers, eDAQ_headers,
-                                                                        run_num)
+        write_sync_data(INCA_data_mta, eDAQ_data_mta, run_num)
 
 
 if __name__ == "__main__":
     main_prog()
 
 # Delete useless data between events.
-
-# Store headers in dictionaries, remove from function formal params and return
-# vals
 
 # May be able to remove trim_data() to remove data at beginning of file and
 # in between events all at once.
