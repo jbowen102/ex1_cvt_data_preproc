@@ -13,6 +13,9 @@ class DataReadError(Exception):
 class DataSyncError(Exception):
     pass
 
+class DataTrimError(Exception):
+    pass
+
 
 # This isn't used, but I found a way to digest the input string and escape the
 # backslashes that I didn't know before.
@@ -73,7 +76,7 @@ def path_find(target_run_num=False):
     for eDAQ_run in all_eDAQ_runs:
         # Split the extension off the file name, then isolate the final two
         # numbers off the date
-        run_num_i = os.path.splitext(eDAQ_run)[0].split("_")[1]
+        run_num_i = os.path.splitext(eDAQ_run)[0].split("_")[1][0:2]
         if run_num_i == eDAQ_file_num:
             # break out of look while "eDAQ_run" is set to correct filename
             found_eDAQ = True
@@ -317,17 +320,17 @@ def sync_data(INCA_data, eDAQ_data):
 
 
 def left_trim_data(data_dict):
-    """Truncates beginning of the file, making start point 0.5 seconds before
+    """Truncates beginning of the file, making start point 1.0 seconds before
     first pedal-down event."""
 
     data_mdict = data_dict.copy()
 
     pedal_high_start_i, pedal_high_start_t = find_first_pedal_high(data_dict)
-    if pedal_high_start_t > 0.5:
-        match_time_index = find_closest(pedal_high_start_t - 0.5,
+    if pedal_high_start_t > 1.0:
+        match_time_index = find_closest(pedal_high_start_t - 1.0,
                                                             data_dict["time"])
 
-        # Transcribe data from each channel starting at this -0.5s mark.
+        # Transcribe data from each channel starting at this -1.0s mark.
         for k in data_dict:
             data_mdict[k] = data_dict[k][match_time_index:]
 
@@ -336,7 +339,7 @@ def left_trim_data(data_dict):
         data_mdict["time"] = [x - new_start_time for x in data_mdict["time"]]
 
     else:
-        # Don't remove any data if there's already less than a half second
+        # Don't remove any data if there's already less than one second
         # before first pedal actuation.
         pass
 
@@ -405,12 +408,53 @@ def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
             pass
 
     print(valid_event_times)
-    return None, None
+
+    if not valid_event_times:
+        # If no times were stored, then something might be wrong.
+        raise DataTrimError("No valid pedal-down events found.")
+
     # make sure if two >45% events (w/ pedal lift between) are closer that 5s,
     # don't cut into either one. Look at each pair of end/start points, and
-    # if they're closer than 5s, merge those two events so nothing's cut.
-    # find closest times in both INCA and eDAQ files.
-    # transcribe headers and only
+    # if they're closer than 5s, merge those two.
+    previous_pair = valid_event_times[0]
+    valid_event_times_c = valid_event_times.copy()
+    for n, pair in enumerate(valid_event_times[1:]):
+        print("\t%f - %f" % (pair[0], previous_pair[1]))
+        if pair[0] - previous_pair[1] < 5:
+            # Replace the two pairs with a single combined pair
+            del valid_event_times_c[n-1]
+            valid_event_times_c[n] = [ previous_pair[0], pair[1] ]
+        previous_pair = pair
+    print(valid_event_times_c)
+
+
+    # add one second buffer to each side of valid pedal-down events.
+    for n, pair in enumerate(valid_event_times_c):
+        new_start = find_closest(pair[0] - 1.0, INCA_data["time"])
+        print("New start: %f" % INCA_data["time"][new_start])
+        pair[0] = INCA_data["time"][new_start]
+
+        new_end = find_closest(pair[1] + 1.0, INCA_data["time"])
+        print("New end: %f" % INCA_data["time"][new_end])
+        pair[1] = INCA_data["time"][new_end]
+
+        if n == 0 and new_start != 0:
+            # should maintain zero start value, but this will stop it if not.
+            DataTrimError("INCA time vector no longer starting at 0.")
+
+    print(valid_event_times_c)
+
+    # duplicate data structure
+
+    INCA_data_a = INCA_data.copy()
+
+    # offset INCA time vector to maintain continuity.
+    # find closest times in eDAQ files.
+
+    # make sure everything works in case of only one valid range (ex. 0105)
+
+    # transcribe only the valid data ranges into new dicts
+    return None, None
 
 
 def transpose_data_lists(data_dict):
