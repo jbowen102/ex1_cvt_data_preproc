@@ -14,7 +14,6 @@ class DataSyncError(Exception):
     pass
 
 
-
 # This isn't used, but I found a way to digest the input string and escape the
 # backslashes that I didn't know before.
 def path_intake(data_type):
@@ -165,7 +164,7 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
     # Open file with read priveleges.
     # File automatically closed at end of "with/as" block.
     with open(INCA_path, "r") as inca_ascii_file:
-        print("Reading INCA data from %s" % INCA_data_path) # debug
+        print("Reading INCA data from %s" % INCA_path) # debug
         INCA_file_in = csv.reader(inca_ascii_file, delimiter="\t")
         # https://stackoverflow.com/questions/7856296/parsing-csv-tab-delimited-txt-file-with-python
 
@@ -196,7 +195,7 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
 
     # now read eDAQ data
     with open(eDAQ_path, "r") as edaq_ascii_file:
-        print("Reading eDAQ data from %s" % eDAQ_data_path) # debug
+        print("Reading eDAQ data from %s" % eDAQ_path) # debug
         eDAQ_file_in = csv.reader(edaq_ascii_file, delimiter="\t")
         # https://stackoverflow.com/questions/7856296/parsing-csv-tab-delimited-txt-file-with-python
 
@@ -318,8 +317,8 @@ def sync_data(INCA_data, eDAQ_data):
 
 
 def left_trim_data(data_dict):
-    """Isolates important events in data by removing any parts where the
-    throttle isn't open >40% for >1 second."""
+    """Truncates beginning of the file, making start point 0.5 seconds before
+    first pedal-down event."""
 
     data_mdict = data_dict.copy()
 
@@ -344,6 +343,76 @@ def left_trim_data(data_dict):
     return data_mdict
 
 
+def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
+    """Isolates important events in data by removing any long stretches of no
+    pedal input of pedal events during which the throttle position >45% or
+    whatever throt_thresh (throttle threshold) not sustained for >2 second or
+    whatever thr_t_thresh."""
+
+    # list of start and end times for pedal-down events with a segment of >45%
+    # throttle for >2s.
+    valid_event_times = []
+
+    # maintain a buffer of candidate pedal-down and throttle time vals.
+    ped_buffer = []
+    high_throttle_time = [0, 0]
+
+    pedal_down = False
+    counting = False
+    keep = False
+    for i, ti in enumerate(INCA_data["time"]):
+        # Main loop evaluates pedal-down event. Stores event start and end times
+        # if inner loop determines throttle was >45% for >2s during event.
+        if INCA_data["pedal_sw"][i]:
+            if not pedal_down:
+                print("\nPedal goes high at time %f" % ti)
+            # pedal currently down
+            pedal_down = True
+            ped_buffer.append(ti) # add current time to pedal buffer.
+
+            ## Calculate throttle >45% time to determine event legitimacy
+            if not counting and INCA_data["throttle"][i] > throt_thresh:
+                # first time throttle exceeds 45%
+                print("\tThrottle > %d at time %f" % (throt_thresh, ti))
+                high_throttle_time[0] = ti
+                counting = True
+
+            elif counting and INCA_data["throttle"][i] < throt_thresh:
+                # throttle drops below 45%
+                print("\tThrottle < %d at time %f" % (throt_thresh, ti))
+                high_throttle_time[1] = INCA_data["time"][i-1] # previous time
+                delta = high_throttle_time[1] - high_throttle_time[0]
+                print("\tThrottle < %d total time: %f" % (throt_thresh, delta))
+                # calculate if that >45% throttle event lasted longer than 2s.
+                if high_throttle_time[1] - high_throttle_time[0] > thr_t_thresh:
+                    keep = True
+                    # now the times stored in ped_buffer constitute a valid
+                    # event. As long as the pedal switch stays actuated,
+                    # subsequentn time indices will be added to ped_buffer.
+                counting = False # reset indicator
+                high_throttle_time = [0, 0] # reset
+
+        elif pedal_down:
+            # pedal just lifted
+            print("pedal lifted at time %f" % ti)
+            if keep:
+                valid_event_times.append( [ped_buffer[0], ped_buffer[-1]] )
+            pedal_down = False
+            ped_buffer = [] # flush buffer
+            keep = False # reset
+        else:
+            # pedal is not currently down, and wasn't just lifted.
+            pass
+
+    print(valid_event_times)
+    return None, None
+    # make sure if two >45% events (w/ pedal lift between) are closer that 5s,
+    # don't cut into either one. Look at each pair of end/start points, and
+    # if they're closer than 5s, merge those two events so nothing's cut.
+    # find closest times in both INCA and eDAQ files.
+    # transcribe headers and only
+
+
 def transpose_data_lists(data_dict):
     """Reformats data dict into transposed list of lists"""
     # Take all data lists stored in dictionary by channel name and create
@@ -366,17 +435,14 @@ def combine_data_arrays(INCA_array, eDAQ_array):
     if len(INCA_array) > len(eDAQ_array):
         sync_array = INCA_array[:]
         for line_no, line in enumerate(eDAQ_array):
-            # for line_no in range(len(ECU_data_mlist)):
             sync_array[line_no].append("")
             sync_array[line_no] += line
-            # sync_array[line_no] += tuple(ECU_data_mlist[line_no])
+
     else:
         sync_array = eDAQ_array[:]
         for line_no, line in enumerate(INCA_array):
-            # for line_no in range(len(ECU_data_mlist)):
             sync_array[line_no].append("")
             sync_array[line_no] += line
-            # sync_array[line_no] += tuple(ECU_data_mlist[line_no])
 
     return sync_array
 
@@ -420,71 +486,89 @@ def write_sync_data(INCA_data, eDAQ_data, INCA_headers, eDAQ_headers,
         print("...done\n")
 
 
-# If you pass in any arguments from the command line after "python run.py",
-# This pulls them in. If "auto" specified, process all data.
-# If second arg is "over", then automatically overwrite any existing exports in
-# the ./sync_data folder.
-autorun_arg = False # initializing for later conditional
-if len(sys.argv) == 2:
-    prog, autorun_arg = sys.argv
-    overw_arg = False
-    # print(autorun_arg)
-elif len(sys.argv) == 3:
-    prog, autorun_arg, overw_arg = sys.argv
-    # print(autorun_arg)
-    # print(overw_arg)
+def main_prog():
+    """Main program that runs automatically as long as cwd is correct."""
+    # Define constants to use in isolating useful data.
+    throttle_threshold = 45
+    throttle_time_threshold = 2
 
-if type(autorun_arg) is str and autorun_arg.lower() == "auto":
-    # loop through ordered contents of ./raw_data/INCA and process each run.
-    INCA_root = "./raw_data/INCA/"
-    INCA_files = os.listdir(INCA_root)
-    INCA_files.sort()
-    for INCA_file in INCA_files:
-        INCA_run = run_name_parse(INCA_file)
-        run_num, INCA_data_path, eDAQ_data_path = path_find(INCA_run)
-        # as written, eDAQ file will have to be repeatedly opened and read for
-        # each separate INCA run. If this ends up too slow, program can be
-        # re-written a different way. It's probably fine now though.
+    # If you pass in any arguments from the command line after "python run.py",
+    # This pulls them in. If "--auto" specified, process all data.
+    # If second arg is "--over", then automatically overwrite any existing
+    # exports in the ./sync_data folder.
+    autorun_arg = False # initializing for later conditional
+    if len(sys.argv) == 2:
+        prog, autorun_arg = sys.argv
+        overw_arg = False
+        # print(autorun_arg)
+    elif len(sys.argv) == 3:
+        prog, autorun_arg, overw_arg = sys.argv
+        # print(autorun_arg)
+        # print(overw_arg)
+
+    if type(autorun_arg) is str and autorun_arg.lower() == "--auto":
+        # loop through ordered contents of ./raw_data/INCA and process each run.
+        INCA_root = "./raw_data/INCA/"
+        INCA_files = os.listdir(INCA_root)
+        INCA_files.sort()
+        for INCA_file in INCA_files:
+            INCA_run = run_name_parse(INCA_file)
+            run_num, INCA_data_path, eDAQ_data_path = path_find(INCA_run)
+            # as written, eDAQ file will have to be repeatedly opened and read
+            # for each separate INCA run. If this ends up too slow, program can
+            # be re-written a different way. It's probably fine now though.
+            INCA_headers, eDAQ_headers, INCA_data, eDAQ_data = data_read(
+                                        INCA_data_path, eDAQ_data_path, run_num)
+
+            INCA_mdata, eDAQ_mdata = sync_data(INCA_data, eDAQ_data)
+
+            INCA_mtdata = left_trim_data(INCA_mdata)
+            eDAQ_mtdata = left_trim_data(eDAQ_mdata)
+
+            INCA_data_mta, eDAQ_data_mta = abbreviate_data(INCA_mtdata,
+                    eDAQ_mtdata, throttle_threshold, throttle_time_threshold)
+
+            # If "over" specified, automatically overwrite destination files.
+            if type(overw_arg) is str and overw_arg.lower() == "--over":
+                auto_overwrite = True
+            else:
+                auto_overwrite = False
+
+            write_sync_data(INCA_mtdata, eDAQ_mtdata, INCA_headers,
+                                        eDAQ_headers, run_num, auto_overwrite)
+
+    else:
+        # run with user input for specific run to use
+        run_num, INCA_data_path, eDAQ_data_path = path_find()
+
+        print("\t%s" % INCA_data_path) # debug
+        print("\t%s\n" % eDAQ_data_path) # debug
+
         INCA_headers, eDAQ_headers, INCA_data, eDAQ_data = data_read(
-                                    INCA_data_path, eDAQ_data_path, run_num)
+                                        INCA_data_path, eDAQ_data_path, run_num)
 
         INCA_mdata, eDAQ_mdata = sync_data(INCA_data, eDAQ_data)
 
         INCA_mtdata = left_trim_data(INCA_mdata)
         eDAQ_mtdata = left_trim_data(eDAQ_mdata)
 
-        # If "over" specified, automatically overwrite destination files.
-        if type(overw_arg) is str and overw_arg.lower() == "over":
-            auto_overwrite = True
-        else:
-            auto_overwrite = False
-
+        INCA_data_mta, eDAQ_data_mta = abbreviate_data(INCA_mtdata,
+                eDAQ_mtdata, throttle_threshold, throttle_time_threshold)
+        quit()
         write_sync_data(INCA_mtdata, eDAQ_mtdata, INCA_headers, eDAQ_headers,
-                                                        run_num, auto_overwrite)
-
-else:
-    # run with user input for specific run to use
-    run_num, INCA_data_path, eDAQ_data_path = path_find()
-
-    print("\t%s" % INCA_data_path) # debug
-    print("\t%s\n" % eDAQ_data_path) # debug
-
-    INCA_headers, eDAQ_headers, INCA_data, eDAQ_data = data_read(
-                                        INCA_data_path, eDAQ_data_path, run_num)
-
-    INCA_mdata, eDAQ_mdata = sync_data(INCA_data, eDAQ_data)
-
-    INCA_mtdata = left_trim_data(INCA_mdata)
-    eDAQ_mtdata = left_trim_data(eDAQ_mdata)
-
-    write_sync_data(INCA_mtdata, eDAQ_mtdata, INCA_headers, eDAQ_headers,
                                                                         run_num)
 
 
-# Delete useless data before the first pedal actuation
-# Keep first time value = 0
+if __name__ == "__main__":
+    main_prog()
 
 # Delete useless data between events.
+
+# Store headers in dictionaries, remove from function formal params and return
+# vals
+
+# May be able to remove trim_data() to remove data at beginning of file and
+# in between events all at once.
 
 # Plot data to determine if trimming is correct.
 
