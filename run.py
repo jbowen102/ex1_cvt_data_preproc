@@ -56,6 +56,8 @@ def path_find(target_run_num=False):
     all_inca_runs = os.listdir(inca_dir)
     found_inca = False # initialize to false. Will change if file is found.
     for inca_run in all_inca_runs:
+        if os.path.isdir(os.path.join(inca_dir, inca_run)):
+            continue # ignore any directories found
         run_num_i = run_name_parse(inca_run)
         if run_num_i == target_run_num:
             # break out of look while "inca_run" is set to correct filename
@@ -77,6 +79,8 @@ def path_find(target_run_num=False):
     all_eDAQ_runs = os.listdir(eDAQ_dir)
     found_eDAQ = False # initialize to false. Will change if file is found.
     for eDAQ_run in all_eDAQ_runs:
+        if os.path.isdir(os.path.join(eDAQ_dir, eDAQ_run)):
+            continue # ignore any directories found
         # Split the extension off the file name, then isolate the final two
         # numbers off the date
         run_num_i = os.path.splitext(eDAQ_run)[0].split("_")[1][0:2]
@@ -144,10 +148,10 @@ def find_closest(t_val, t_list):
             smallest_diff = diff
             time_index = i
 
-    print("\tValue in t_list closest to t_val (%f): %f" %
-                                                    (t_val, t_list[time_index]))
-    print("\tIndex of t_list with value closest to t_val (%f): %d" %
-                                                            (t_val, time_index))
+    # print("\tValue in t_list closest to t_val (%f): %f" %
+    #                                                 (t_val, t_list[time_index]))
+    # print("\tIndex of t_list with value closest to t_val (%f): %d" %
+    #                                                         (t_val, time_index))
 
     # Closest val should never be farther than half the lowest sampling rate.
     if (t_val-t_list[time_index])**2 > ((1.0/15)/2)**2:
@@ -179,6 +183,8 @@ def data_read(INCA_path, eDAQ_path, run_num_text):
             if i == 2 or i == 4:
                 # Save headers so we can use them when exporting synced data.
                 INCA_data_dict["HEADERS"].append(INCA_row)
+                # print("Headers row read in:")
+                # print(INCA_data_dict["HEADERS"])
             if i == 5:
                 # first row of actual data - contains first time value.
                 # if it's nonzero, need to force it there then offset all future
@@ -264,7 +270,8 @@ def sync_data(INCA_data, eDAQ_data):
                                                                       INCA_data)
     edaq_pedal_high_start_i, edaq_pedal_high_start_t = find_first_pedal_high(
                                                                       eDAQ_data)
-    print("\n\tINCA first pedal high: %f" % inca_pedal_high_start_t)
+    print("\nSync:")
+    print("\tINCA first pedal high: %f" % inca_pedal_high_start_t)
     print("\teDAQ first pedal high: %f" % edaq_pedal_high_start_t)
 
 
@@ -277,6 +284,8 @@ def sync_data(INCA_data, eDAQ_data):
 
         # this is where the separate, new dict comes in handy.
         for k in INCA_data:
+            if k == "HEADERS":
+                    continue # don't touch headers
             INCA_mdata[k] = INCA_data[k][index_offset:]
         # Offset time values to still start at zero. Necessary because offset
         # stream doesn't necessarily yield start time of 0.
@@ -298,6 +307,8 @@ def sync_data(INCA_data, eDAQ_data):
 
         # this is where the separate, new dict comes in handy.
         for k in eDAQ_data:
+            if k == "HEADERS":
+                continue # don't touch headers
             eDAQ_mdata[k] = eDAQ_data[k][index_offset:]
             # Offset time values to still start at zero
             # necessary because streams doesn't necessarily start at time 0
@@ -331,6 +342,8 @@ def left_trim_data(data_dict):
 
         # Transcribe data from each channel starting at this -1.0s mark.
         for k in data_dict:
+            if k == "HEADERS":
+                continue # don't touch headers
             data_mdict[k] = data_dict[k][match_time_index:]
 
         # offset the start time to still be zero.
@@ -349,7 +362,9 @@ def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
     """Isolates important events in data by removing any long stretches of no
     pedal input of pedal events during which the throttle position >45% or
     whatever throt_thresh (throttle threshold) not sustained for >2 second or
-    whatever thr_t_thresh."""
+    whatever thr_t_thresh.
+    Should be able to get the left truncation currently performed by another
+    function."""
 
     # list of start and end times for pedal-down events with a segment of >45%
     # throttle for >2s.
@@ -359,6 +374,7 @@ def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
     ped_buffer = []
     high_throttle_time = [0, 0]
 
+    print("\nEvent parsing:")
     pedal_down = False
     counting = False
     keep = False
@@ -367,7 +383,7 @@ def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
         # if inner loop determines throttle was >45% for >2s during event.
         if INCA_data["pedal_sw"][i]:
             if not pedal_down:
-                print("\nPedal goes high at time %f s" % ti)
+                print("\tPedal goes high at time\t\t%0.4fs" % ti)
             # pedal currently down
             pedal_down = True
             ped_buffer.append(ti) # add current time to pedal buffer.
@@ -375,16 +391,16 @@ def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
             ## Calculate throttle >45% time to determine event legitimacy
             if not counting and INCA_data["throttle"][i] > throt_thresh:
                 # first time throttle exceeds 45%
-                print("\tThrottle >%d%% at time %f s" % (throt_thresh, ti))
+                print("\t\tThrottle >%d%% at time\t%0.4fs" % (throt_thresh, ti))
                 high_throttle_time[0] = ti
                 counting = True
 
             elif counting and INCA_data["throttle"][i] < throt_thresh:
                 # throttle drops below 45%
-                print("\tThrottle <%d%% at time %f s" % (throt_thresh, ti))
+                print("\t\tThrottle <%d%% at time\t%0.4fs" % (throt_thresh, ti))
                 high_throttle_time[1] = INCA_data["time"][i-1] # previous time
                 delta = high_throttle_time[1] - high_throttle_time[0]
-                print("\tThrottle >%d%% total time: %f s" % (throt_thresh, delta))
+                print("\t\tThrottle >%d%% total t:\t%0.4fs" % (throt_thresh, delta))
                 # calculate if that >45% throttle event lasted longer than 2s.
                 if high_throttle_time[1] - high_throttle_time[0] > thr_t_thresh:
                     keep = True
@@ -396,7 +412,7 @@ def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
 
         elif pedal_down:
             # pedal just lifted
-            print("pedal lifted at time %f s" % ti)
+            print("\tPedal lifted at time\t\t%0.4fs\n" % ti)
             if keep:
                 valid_event_times.append( [ped_buffer[0], ped_buffer[-1]] )
             pedal_down = False
@@ -407,7 +423,8 @@ def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
             pass
 
     print("\nValid ranges:")
-    print(valid_event_times)
+    for event_time in valid_event_times:
+        print("\t%0.3f\t->\t%0.3f" % (event_time[0], event_time[1]))
 
     if not valid_event_times:
         # If no times were stored, then something might be wrong.
@@ -426,17 +443,18 @@ def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
             valid_event_times_c[n] = [ previous_pair[0], pair[1] ]
         previous_pair = pair
     print("\nAfter any merges:")
-    print(valid_event_times_c)
+    for event_time in valid_event_times_c:
+        print("\t%0.3f\t->\t%0.3f" % (event_time[0], event_time[1]))
 
-    print("\nLooking for real times to use after adding 1-second buffers:")
+    # print("\nLooking for real times to use after adding 1-second buffers:")
     # add one-second buffer to each side of valid pedal-down events.
     for n, pair in enumerate(valid_event_times_c):
         new_start = find_closest(pair[0] - 1.0, INCA_data["time"])
-        print("New start: %f" % INCA_data["time"][new_start])
+        # print("New start: %f" % INCA_data["time"][new_start])
         pair[0] = INCA_data["time"][new_start]
 
         new_end = find_closest(pair[1] + 1.0, INCA_data["time"])
-        print("New end: %f" % INCA_data["time"][new_end])
+        # print("New end: %f" % INCA_data["time"][new_end])
         pair[1] = INCA_data["time"][new_end]
 
         if n == 0 and new_start != 0:
@@ -444,7 +462,9 @@ def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
             DataTrimError("INCA time vector no longer starting at 0.")
 
     print("\nINCA times with 1-second buffers added:")
-    print(valid_event_times_c)
+    for event_time in valid_event_times_c:
+        print("\t%0.3f\t->\t%0.3f" % (event_time[0], event_time[1]))
+    print("\n")
 
     # duplicate data structure
     INCA_data_a = INCA_data.copy()
@@ -458,17 +478,24 @@ def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
             dict_i[key] = []
 
     desired_start_t = 0
+    desired_start_t_edaq = 0
     for n, time_range in enumerate(valid_event_times_c):
         INCA_start_i = INCA_data["time"].index(time_range[0])
         INCA_end_i = INCA_data["time"].index(time_range[1])
 
-        # INCA_data_a["time"].append(INCA_data["time"][INCA_start_i:INCA_end_i])
-
         # shift time values to maintain continuity.
-        shift = time_range[0] - desired_start_t
-        print("\nShift: %f" % (shift))
+        INCA_shift = time_range[0] - desired_start_t
+        print("Shift (event %d): %f" % (n, INCA_shift))
         for old_time in INCA_data["time"][INCA_start_i:INCA_end_i]:
-            INCA_data_a["time"].append(old_time - shift)
+            INCA_data_a["time"].append(old_time - INCA_shift)
+
+        edaq_match_start_i = find_closest(time_range[0], eDAQ_data["time"])
+        edaq_match_end_i = find_closest(time_range[1], eDAQ_data["time"])
+
+        eDAQ_shift = eDAQ_data["time"][edaq_match_start_i]-desired_start_t_edaq
+        # print("\nShift (eDAQ): %f" % (eDAQ_shift))
+        for old_time in eDAQ_data["time"][edaq_match_start_i:edaq_match_end_i]:
+            eDAQ_data_a["time"].append(old_time - eDAQ_shift)
 
         # Transcribe rest of the data based on indices corresponding to
         # the event time ranges.
@@ -478,21 +505,28 @@ def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
                 continue
             else:
                 INCA_data_a[key] += INCA_data[key][INCA_start_i:INCA_end_i]
+        for key in eDAQ_data:
+            if key == "HEADERS" or key == "time":
+                # ignore headers and time (already handled)
+                continue
+            else:
+                eDAQ_data_a[key] += eDAQ_data[key][edaq_match_start_i:edaq_match_end_i]
 
         # define next start time to be next time value after new vector's
         # end time.
         desired_start_t = INCA_data["time"][find_closest(
-                                    time_range[1] - shift, INCA_data["time"])]
+                                time_range[1] - INCA_shift, INCA_data["time"])]
+        desired_start_t_edaq = eDAQ_data["time"][find_closest(
+                                           desired_start_t, eDAQ_data["time"])]
+        # print("desired start times (INCA/eDAQ): %f, %f" % (desired_start_t,
+        #                                                 desired_start_t_edaq))
 
-        # print("\nLooking for real time to use for shifted intermediate "
-        #                                                          "start val:")
-        # desired_start_t = INCA_data["time"][find_closest(
-        #               INCA_data_a["time"][-1] + time_step, INCA_data["time"])]
-    print("Time span: %f -> %f" % (INCA_data_a["time"][0],
-                                  INCA_data_a["time"][-1]))
-    # find closest times in eDAQ files.
+    print("\nINCA file time span: %f -> %f (%d data points)" %
+    (INCA_data_a["time"][0], INCA_data_a["time"][-1], len(INCA_data_a["time"])))
+    print("eDAQ file time span: %f -> %f (%d data points)" %
+    (eDAQ_data_a["time"][0], eDAQ_data_a["time"][-1], len(eDAQ_data_a["time"])))
 
-    return None, None
+    return INCA_data_a, eDAQ_data_a
 
 
 def transpose_data_lists(data_dict):
@@ -524,10 +558,17 @@ def combine_data_arrays(INCA_array, eDAQ_array):
             sync_array[line_no] += line
 
     else:
-        sync_array = eDAQ_array[:]
-        for line_no, line in enumerate(INCA_array):
-            sync_array[line_no].append("")
-            sync_array[line_no] += line
+        # still want INCA data to be on the left.
+        sync_array = INCA_array[:]
+        for line_no, line in enumerate(eDAQ_array):
+            if len(INCA_array) >= line_no + 1:
+                # Copy INCA data unless it runs out.
+                # sync_array[line_no].append("")
+                sync_array[line_no] += [""]
+                sync_array[line_no] += line
+            else:
+                # If eDAQ data contains more points, pad first four columns
+                sync_array.append(["", "", "", "", ""] + line)
 
     return sync_array
 
@@ -596,6 +637,8 @@ def main_prog():
         INCA_files = os.listdir(INCA_root)
         INCA_files.sort()
         for INCA_file in INCA_files:
+            if os.path.isdir(os.path.join(INCA_root, INCA_file)):
+                continue # ignore any directories found
             INCA_run = run_name_parse(INCA_file)
             run_num, INCA_data_path, eDAQ_data_path = path_find(INCA_run)
             # as written, eDAQ file will have to be repeatedly opened and read
@@ -609,6 +652,8 @@ def main_prog():
             INCA_mtdata = left_trim_data(INCA_mdata)
             eDAQ_mtdata = left_trim_data(eDAQ_mdata)
 
+            # Should be able to generalize abbreviate_data() to do the job
+            # left_trim_data() is doing.
             INCA_data_mta, eDAQ_data_mta = abbreviate_data(INCA_mtdata,
                     eDAQ_mtdata, throttle_threshold, throttle_time_threshold)
 
@@ -636,9 +681,11 @@ def main_prog():
         INCA_mtdata = left_trim_data(INCA_mdata)
         eDAQ_mtdata = left_trim_data(eDAQ_mdata)
 
+        # Should be able to generalize abbreviate_data() to do the job
+        # left_trim_data() is doing.
         INCA_data_mta, eDAQ_data_mta = abbreviate_data(INCA_mtdata,
                 eDAQ_mtdata, throttle_threshold, throttle_time_threshold)
-        quit()
+
         write_sync_data(INCA_data_mta, eDAQ_data_mta, run_num)
 
 
