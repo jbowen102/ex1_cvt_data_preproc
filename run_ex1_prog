@@ -1,0 +1,89 @@
+#!/bin/bash
+
+# If not mounted already, mount the P network drive to pull data from.
+if [ "$(ls -A /mnt/p/)" ]
+then
+	: # do nothing
+else
+	printf "P: drive not mounted. Enter password if prompted.\n"
+	sudo ${HOME}/pu_automount
+fi
+
+
+# Make sure local data folders are empty
+LOCAL_RAW="$HOME/ex1_cvt_data_preproc/raw_data"
+LOCAL_SYNC="$HOME/ex1_cvt_data_preproc/sync_data"
+
+if [ "$(ls -A ${LOCAL_RAW}/INCA/)" ]
+then
+	rm ${LOCAL_RAW}/INCA/*
+fi
+
+if [ "$(ls -A ${LOCAL_RAW}/eDAQ/)" ]
+then
+	rm ${LOCAL_RAW}/eDAQ/*
+fi
+
+if [ "$(ls -A ${LOCAL_SYNC}/)" ]
+then
+	rm ${LOCAL_SYNC}/*
+fi
+
+
+# Copy data from P drive folder into local project's directory structure.
+REMOTE_RAW="/mnt/p/Current Projects/100840 GOAT Engine/Prod Engg/Test_&_Reliab_Svcs/CVT/RAW_DATA_TO_SYNC"
+REMOTE_SYNC="/mnt/p/Current Projects/100840 GOAT Engine/Prod Engg/Test_&_Reliab_Svcs/CVT/SYNCED_DATA"
+
+if [ "$(ls -A "${REMOTE_RAW}/INCA/")" ]
+then
+	printf "Copying data from P: drive RAW_DATA_TO_SYNC/INCA folder...\n"
+	cp "${REMOTE_RAW}"/INCA/* ${LOCAL_RAW}/INCA
+else
+	printf "Nothing found in P: drive RAW_DATA_TO_SYNC/INCA/ folder. Exiting.\n"
+	exit 1
+fi
+
+if [ "$(ls -A "${REMOTE_RAW}/eDAQ/")" ]
+then
+	printf "Copying data from P: drive RAW_DATA_TO_SYNC/eDAQ folder...\n"
+	cp "${REMOTE_RAW}"/eDAQ/* ${LOCAL_RAW}/eDAQ
+else
+	printf "Nothing found in P: drive RAW_DATA_TO_SYNC/INCA/ folder. Exiting.\n"
+	exit 1
+fi
+
+
+# Navigate into the local project then run the python script, storing its return value.
+cd ~/ex1_cvt_data_preproc # Need to be in the project dir for the Python script to run its main function.
+
+printf "Starting Python script:\n"
+python3 run.py --auto --over
+PYTHON_RETURN=$? # gets return value of last command executed.
+printf "Finished Python script.\n"
+
+
+# Make sure the program ran correctly
+if [ ${PYTHON_RETURN} -ne 0 ]
+then
+	printf "\nSomething went wrong when executing the Python program.\n"
+	exit 1
+fi
+
+
+# Copy synced data to P: drive. Make sure no data lingering in destination folder first.
+if [ "$(ls -A "${REMOTE_SYNC}/")" ]
+then
+	printf "\nSYNCED_DATA folder on P: drive not empty.\nContinue anyway (might overwrite something)?\nEnter 'Y' to proceed or anything else to quit.\n"
+	read -p ">" answer
+	if [ "$answer" == "y" -o "$answer" == "Y" ]
+	then
+		: # do nothing. Proceed out of if statement and run final lines of code.
+	else
+		printf "Aborting copy.\n"
+		exit 1
+	fi
+fi
+
+printf "\nCopying data back to P: drive SYNCED_DATA folder...\n"
+cp ${LOCAL_SYNC}/* "${REMOTE_SYNC}"
+
