@@ -87,3 +87,11 @@ fi
 printf "\nCopying data back to P: drive SYNCED_DATA folder...\n"
 cp ${LOCAL_SYNC}/* "${REMOTE_SYNC}"
 
+
+
+# References:
+# https://stackoverflow.com/questions/6834487/what-is-the-dollar-question-mark-variable-in-shell-scripting
+# https://stackoverflow.com/questions/14561475/use-bash-home-in-shell-script#14561608
+# https://stackoverflow.com/questions/4181703/how-to-concatenate-string-variables-in-bash
+# https://www.cyberciti.biz/faq/linux-unix-shell-check-if-directory-empty/
+# https://stackoverflow.com/questions/8352851/how-to-call-one-shell-script-from-another-shell-script
