@@ -60,7 +60,7 @@ def path_find(target_run_num=False):
             continue # ignore any directories found
         run_num_i = run_name_parse(inca_run)
         if run_num_i == target_run_num:
-            # break out of look while "inca_run" is set to correct filename
+            # break out of loop while "inca_run" is set to correct filename
             found_inca = True
             break
 
@@ -85,7 +85,7 @@ def path_find(target_run_num=False):
         # numbers off the date
         run_num_i = os.path.splitext(eDAQ_run)[0].split("_")[1][0:2]
         if run_num_i == eDAQ_file_num:
-            # break out of look while "eDAQ_run" is set to correct filename
+            # break out of loop while "eDAQ_run" is set to correct filename
             found_eDAQ = True
             break
     if found_eDAQ:
@@ -692,21 +692,9 @@ def main_prog():
 if __name__ == "__main__":
     main_prog()
 
-# Delete useless data between events.
 
 # May be able to remove trim_data() to remove data at beginning of file and
 # in between events all at once.
 
-# Plot data to determine if trimming is correct.
-
-
-
-# debug
-# print(INCA_data_dict["throttle"][38])
-# print(INCA_data_dict["engine_spd"][315])
-# print(INCA_data_dict["pedal_sw"][305])
-# print(INCA_data_dict["pedal_sw"][306])
-# print(eDAQ_data_dict["gnd_speed"][0])
-# print(eDAQ_data_dict["gnd_speed"][1])
-# print(eDAQ_data_dict["pedal_sw"][630])
-# print(eDAQ_data_dict["pedal_sw"][631])
+# Future feature: plot data before and after to determine if trimming
+# is correct.
