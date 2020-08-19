@@ -125,8 +125,8 @@ def find_edaq_col_offset(header_row, sub_run_num):
 
     if not found_col:
         # got to end of row and didn't find the run in any column heading
-        raise DataReadError("Can't find %s in file %s" %
-                                        (sub_run_num_edaq_format, eDAQ_path))
+        raise DataReadError("Can't find %s in any eDAQ file" %
+                                                        sub_run_num_edaq_format)
 
     return run_start_col
 
