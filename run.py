@@ -449,7 +449,12 @@ def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
     # print("\nLooking for real times to use after adding 1-second buffers:")
     # add one-second buffer to each side of valid pedal-down events.
     for n, pair in enumerate(valid_event_times_c):
-        new_start = find_closest(pair[0] - 1.0, INCA_data["time"])
+        if n == 0 and pair[0] <= 1.0:
+            # Set zero as start value if first time is less than one second.
+            new_start = 0
+        else:
+            new_start = find_closest(pair[0] - 1.0, INCA_data["time"])
+
         # print("New start: %f" % INCA_data["time"][new_start])
         pair[0] = INCA_data["time"][new_start]
 
@@ -458,7 +463,6 @@ def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
         pair[1] = INCA_data["time"][new_end]
 
         if n == 0 and new_start != 0:
-            # should maintain zero start value, but this will stop it if not.
             DataTrimError("INCA time vector no longer starting at 0.")
 
     print("\nINCA times with 1-second buffers added:")
