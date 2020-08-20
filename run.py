@@ -1,7 +1,7 @@
-import sys
-import os
-import wpfix
-import csv
+import os       # Used for analyzing file paths and directories
+import wpfix    # Needed only for now-unused path_intake function.
+import csv      # Needed to read in and write out data
+import argparse # Used to parse optional command-line arguments
 
 
 class FilenameError(Exception):
@@ -621,21 +621,30 @@ def main_prog():
     throttle_threshold = 45
     throttle_time_threshold = 2
 
-    # If you pass in any arguments from the command line after "python run.py",
-    # This pulls them in. If "--auto" specified, process all data.
-    # If second arg is "--over", then automatically overwrite any existing
-    # exports in the ./sync_data folder.
-    autorun_arg = False # initializing for later conditional
-    if len(sys.argv) == 2:
-        prog, autorun_arg = sys.argv
-        overw_arg = False
-        # print(autorun_arg)
-    elif len(sys.argv) == 3:
-        prog, autorun_arg, overw_arg = sys.argv
-        # print(autorun_arg)
-        # print(overw_arg)
+    # Set up command-line argument parser
+    # https://docs.python.org/3/howto/argparse.html
+    parser = argparse.ArgumentParser(description="Program to preprocess Ex1 "
+                                                "CVT data for easier analysis")
+    parser.add_argument("-a", "--auto", help="Automatically process all data "
+                                    "in raw_data folders.", action="store_true")
+    parser.add_argument("-o", "--over", help="Overwrite existing data in "
+                    "sync_data folder without prompting.", action="store_true")
+    parser.add_argument("-p", "--plot", help="Plot data before and after "
+                                            "processing.", action="store_true")
+    args = parser.parse_args()
+    args.auto
+    args.over
+    args.plot
 
-    if type(autorun_arg) is str and autorun_arg.lower() == "--auto":
+    # If you pass in any arguments from the command line after "python run.py",
+    # This pulls them in. If "-a" or "--auto" specified, process all data.
+    # If "-o" or "--over" specified, then overwrite any existing exports in
+    # the ./sync_data folder (without prompting).
+    # If "-p" or "-plot" specified, plot the data before and after syncing
+    # for comparison.
+
+    # if type(autorun_arg) is str and autorun_arg.lower() == "--auto":
+    if args.auto:
         # loop through ordered contents of ./raw_data/INCA and process each run.
         INCA_root = "./raw_data/INCA/"
         INCA_files = os.listdir(INCA_root)
@@ -661,14 +670,7 @@ def main_prog():
             INCA_data_mta, eDAQ_data_mta = abbreviate_data(INCA_mtdata,
                     eDAQ_mtdata, throttle_threshold, throttle_time_threshold)
 
-            # If "over" specified, automatically overwrite destination files.
-            if type(overw_arg) is str and overw_arg.lower() == "--over":
-                auto_overwrite = True
-            else:
-                auto_overwrite = False
-
-            write_sync_data(INCA_data_mta, eDAQ_data_mta, run_num,
-                                                                auto_overwrite)
+            write_sync_data(INCA_data_mta, eDAQ_data_mta, run_num, args.over)
 
     else:
         # run with user input for specific run to use
@@ -690,15 +692,8 @@ def main_prog():
         INCA_data_mta, eDAQ_data_mta = abbreviate_data(INCA_mtdata,
                 eDAQ_mtdata, throttle_threshold, throttle_time_threshold)
 
-        write_sync_data(INCA_data_mta, eDAQ_data_mta, run_num)
+        write_sync_data(INCA_data_mta, eDAQ_data_mta, run_num, args.over)
 
 
 if __name__ == "__main__":
     main_prog()
-
-
-# May be able to remove trim_data() to remove data at beginning of file and
-# in between events all at once.
-
-# Future feature: plot data before and after to determine if trimming
-# is correct.
