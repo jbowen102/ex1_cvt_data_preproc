@@ -3,6 +3,16 @@ import wpfix    # Needed only for now-unused path_intake function.
 import csv      # Needed to read in and write out data
 import argparse # Used to parse optional command-line arguments
 
+try:
+    import matplotlib
+    matplotlib.use("Agg") # no UI backend for use w/ WSL
+    # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
+    import matplotlib.pyplot as plt # Needed for optional data plotting.
+    plot_lib_present = True
+except ImportError:
+    plot_lib_present = False
+# https://stackoverflow.com/questions/3496592/conditional-import-of-modules-in-python
+
 
 class FilenameError(Exception):
     pass
@@ -615,6 +625,35 @@ def write_sync_data(INCA_data, eDAQ_data, full_run_num, auto_overwrite=False):
         print("...done\n")
 
 
+def plot_data(INCA_data_og, INCA_data_synced, run_num):
+    print("Running plot function")
+
+    # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
+    ax1 = plt.subplot(211)
+    plt.plot(INCA_data_og["time"], INCA_data_og["throttle"],
+                label="Throttle (og)")
+    plt.title("INCA Throttle vs. Time")
+    plt.ylabel("Throttle (%)")
+    plt.legend()
+    plt.setp(ax1.get_xticklabels(), visible=False)
+
+    ax2 = plt.subplot(212, sharex=ax1, sharey=ax1)
+    plt.plot(INCA_data_synced["time"], INCA_data_synced["throttle"],
+                label="Throttle (synced)")
+    # https://matplotlib.org/3.2.1/gallery/subplots_axes_and_figures/shared_axis_demo.html#sphx-glr-gallery-subplots-axes-and-figures-shared-axis-demo-py
+
+    plt.xlabel("Time (s)")
+    plt.ylabel("Throttle (%)")
+    plt.legend()
+
+
+    plt.savefig("./figs/%s_fig.png" % run_num)
+    # plt.show() # can't use w/ WSL.
+    # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
+    # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
+    plt.clf()
+
+
 def main_prog():
     """Main program that runs automatically as long as cwd is correct."""
     # Define constants to use in isolating useful data.
@@ -670,6 +709,9 @@ def main_prog():
             INCA_data_mta, eDAQ_data_mta = abbreviate_data(INCA_mtdata,
                     eDAQ_mtdata, throttle_threshold, throttle_time_threshold)
 
+            if args.plot and plot_lib_present:
+                plot_data(INCA_data, INCA_data_mta, run_num)
+
             write_sync_data(INCA_data_mta, eDAQ_data_mta, run_num, args.over)
 
     else:
@@ -691,6 +733,9 @@ def main_prog():
         # left_trim_data() is doing.
         INCA_data_mta, eDAQ_data_mta = abbreviate_data(INCA_mtdata,
                 eDAQ_mtdata, throttle_threshold, throttle_time_threshold)
+
+        if args.plot and plot_lib_present:
+            plot_data(INCA_data, INCA_data_mta, run_num)
 
         write_sync_data(INCA_data_mta, eDAQ_data_mta, run_num, args.over)
 
