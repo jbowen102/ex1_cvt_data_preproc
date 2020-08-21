@@ -625,14 +625,14 @@ def write_sync_data(INCA_data, eDAQ_data, full_run_num, auto_overwrite=False):
         print("...done\n")
 
 
-def plot_data(INCA_data_og, INCA_data_synced, run_num):
+def plot_data(INCA_data_og, INCA_data_synced, run_num, auto_overwrite):
     print("Running plot function")
 
     # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
     ax1 = plt.subplot(211)
     plt.plot(INCA_data_og["time"], INCA_data_og["throttle"],
                 label="Throttle (og)")
-    plt.title("INCA Throttle vs. Time")
+    plt.title("INCA Throttle vs. Time (Run %s)" % run_num)
     plt.ylabel("Throttle (%)")
     plt.legend()
     plt.setp(ax1.get_xticklabels(), visible=False)
@@ -646,8 +646,20 @@ def plot_data(INCA_data_og, INCA_data_synced, run_num):
     plt.ylabel("Throttle (%)")
     plt.legend()
 
+    fig_filepath = "./figs/%s_fig.png" % run_num
 
-    plt.savefig("./figs/%s_fig.png" % run_num)
+    if os.path.exists(fig_filepath) and not auto_overwrite:
+        ow_answer = ""
+        while ow_answer.lower() not in ["y", "n"]:
+            ow_answer = input("\n%s already exists in figs folder. "
+                        "Overwrite? (Y/N)\n> " % os.path.basename(fig_filepath))
+        if ow_answer.lower() == "n":
+            plt.clf()
+            return
+
+    print("\nExporting plot as %s..." % os.path.basename(fig_filepath))
+    plt.savefig(fig_filepath)
+    print("...done")
     # plt.show() # can't use w/ WSL.
     # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
     # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
@@ -710,7 +722,7 @@ def main_prog():
                     eDAQ_mtdata, throttle_threshold, throttle_time_threshold)
 
             if args.plot and plot_lib_present:
-                plot_data(INCA_data, INCA_data_mta, run_num)
+                plot_data(INCA_data, INCA_data_mta, run_num, args.over)
 
             write_sync_data(INCA_data_mta, eDAQ_data_mta, run_num, args.over)
 
@@ -735,7 +747,7 @@ def main_prog():
                 eDAQ_mtdata, throttle_threshold, throttle_time_threshold)
 
         if args.plot and plot_lib_present:
-            plot_data(INCA_data, INCA_data_mta, run_num)
+            plot_data(INCA_data, INCA_data_mta, run_num, args.over)
 
         write_sync_data(INCA_data_mta, eDAQ_data_mta, run_num, args.over)
 
