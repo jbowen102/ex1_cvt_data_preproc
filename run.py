@@ -561,21 +561,30 @@ def transpose_data_lists(data_dict):
     return array_t
 
 
-def combine_data_arrays(INCA_array, eDAQ_array):
+def combine_data_arrays(INCA_data, eDAQ_data):
     """Takes two data arrays and returns combined array.
     """
+    # Create reformatted arrays of just channel data (no headers)
+    INCA_ch_array_t = transpose_data_lists(INCA_data)
+    eDAQ_ch_array_t = transpose_data_lists(eDAQ_data)
+
+    # Add in headers
+    # eDAQ gets padding to line up first data row with INCA format.
+    INCA_array_t = INCA_data["HEADERS"] + INCA_ch_array_t
+    eDAQ_array_t = eDAQ_data["HEADERS"] + [["", "", ""]] + eDAQ_ch_array_t
+
     # Base it off longer file so no data gets cut off.
-    if len(INCA_array) > len(eDAQ_array):
-        sync_array = INCA_array[:]
-        for line_no, line in enumerate(eDAQ_array):
+    if len(INCA_array_t) > len(eDAQ_array_t):
+        sync_array = INCA_array_t[:]
+        for line_no, line in enumerate(eDAQ_array_t):
             sync_array[line_no].append("")
             sync_array[line_no] += line
 
     else:
         # still want INCA data to be on the left.
-        sync_array = INCA_array[:]
-        for line_no, line in enumerate(eDAQ_array):
-            if len(INCA_array) >= line_no + 1:
+        sync_array = INCA_array_t[:]
+        for line_no, line in enumerate(eDAQ_array_t):
+            if len(INCA_array_t) >= line_no + 1:
                 # Copy INCA data unless it runs out.
                 # sync_array[line_no].append("")
                 sync_array[line_no] += [""]
@@ -587,21 +596,8 @@ def combine_data_arrays(INCA_array, eDAQ_array):
     return sync_array
 
 
-def write_sync_data(INCA_data, eDAQ_data, full_run_num, auto_overwrite=False):
+def write_sync_data(sync_array, full_run_num, auto_overwrite=False):
     """Writes data to file, labeled with run number."""
-
-    # Create reformatted arrays of just channel data (no headers)
-    INCA_ch_array_t = transpose_data_lists(INCA_data)
-    eDAQ_ch_array_t = transpose_data_lists(eDAQ_data)
-
-    # Add in headers
-    # eDAQ gets padding to line up first data row with INCA format.
-    INCA_array_t = INCA_data["HEADERS"] + INCA_ch_array_t
-    eDAQ_array_t = eDAQ_data["HEADERS"] + [["", "", ""]] + eDAQ_ch_array_t
-
-    # Create unified array with both datasets
-    sync_array = combine_data_arrays(INCA_array_t, eDAQ_array_t)
-    # print(INCA_array_t[289:292][:]) # debug
 
     # Create new CSV file and write out. Closes automatically at end of with/as
     sync_basename = "%s_Sync.csv" % full_run_num
@@ -724,7 +720,10 @@ def main_prog():
             if args.plot and plot_lib_present:
                 plot_data(INCA_data, INCA_data_mta, run_num, args.over)
 
-            write_sync_data(INCA_data_mta, eDAQ_data_mta, run_num, args.over)
+            # Create unified array with both datasets
+            sync_array = combine_data_arrays(INCA_data_mta, eDAQ_data_mta)
+
+            write_sync_data(sync_array, run_num, args.over)
 
     else:
         # run with user input for specific run to use
@@ -749,7 +748,10 @@ def main_prog():
         if args.plot and plot_lib_present:
             plot_data(INCA_data, INCA_data_mta, run_num, args.over)
 
-        write_sync_data(INCA_data_mta, eDAQ_data_mta, run_num, args.over)
+        # Create unified array with both datasets
+        sync_array = combine_data_arrays(INCA_data_mta, eDAQ_data_mta)
+
+        write_sync_data(sync_array, run_num, args.over)
 
 
 if __name__ == "__main__":
