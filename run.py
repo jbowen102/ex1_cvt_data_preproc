@@ -670,6 +670,12 @@ def main_prog():
 
     # Set up command-line argument parser
     # https://docs.python.org/3/howto/argparse.html
+    # If you pass in any arguments from the command line after "python run.py",
+    # This pulls them in. If "-a" or "--auto" specified, process all data.
+    # If "-o" or "--over" specified, then overwrite any existing exports in
+    # the ./sync_data folder (without prompting).
+    # If "-p" or "-plot" specified, plot the data before and after syncing
+    # for comparison.
     parser = argparse.ArgumentParser(description="Program to preprocess Ex1 "
                                                 "CVT data for easier analysis")
     parser.add_argument("-a", "--auto", help="Automatically process all data "
@@ -683,54 +689,24 @@ def main_prog():
     args.over
     args.plot
 
-    # If you pass in any arguments from the command line after "python run.py",
-    # This pulls them in. If "-a" or "--auto" specified, process all data.
-    # If "-o" or "--over" specified, then overwrite any existing exports in
-    # the ./sync_data folder (without prompting).
-    # If "-p" or "-plot" specified, plot the data before and after syncing
-    # for comparison.
-
-    # if type(autorun_arg) is str and autorun_arg.lower() == "--auto":
     if args.auto:
         # loop through ordered contents of ./raw_data/INCA and process each run.
         INCA_root = "./raw_data/INCA/"
         INCA_files = os.listdir(INCA_root)
         INCA_files.sort()
-        for INCA_file in INCA_files:
-            if os.path.isdir(os.path.join(INCA_root, INCA_file)):
-                continue # ignore any directories found
+    else:
+        INCA_files = ["placeholder"]
+        # hack to generalize the below loop for a single run.
+
+    for INCA_file in INCA_files:
+        if args.auto and os.path.isdir(os.path.join(INCA_root, INCA_file)):
+            continue # ignore any directories found
+        elif args.auto:
             INCA_run = run_name_parse(INCA_file)
             run_num, INCA_data_path, eDAQ_data_path = path_find(INCA_run)
-            # as written, eDAQ file will have to be repeatedly opened and read
-            # for each separate INCA run. If this ends up too slow, program can
-            # be re-written a different way. It's probably fine now though.
-            INCA_data, eDAQ_data = data_read(INCA_data_path, eDAQ_data_path,
-                                                                        run_num)
-
-            INCA_mdata, eDAQ_mdata = sync_data(INCA_data, eDAQ_data)
-
-            INCA_mtdata = left_trim_data(INCA_mdata)
-            eDAQ_mtdata = left_trim_data(eDAQ_mdata)
-
-            # Should be able to generalize abbreviate_data() to do the job
-            # left_trim_data() is doing.
-            INCA_data_mta, eDAQ_data_mta = abbreviate_data(INCA_mtdata,
-                    eDAQ_mtdata, throttle_threshold, throttle_time_threshold)
-
-            if args.plot and plot_lib_present:
-                plot_data(INCA_data, INCA_data_mta, run_num, args.over)
-
-            # Create unified array with both datasets
-            sync_array = combine_data_arrays(INCA_data_mta, eDAQ_data_mta)
-
-            write_sync_data(sync_array, run_num, args.over)
-
-    else:
-        # run with user input for specific run to use
-        run_num, INCA_data_path, eDAQ_data_path = path_find()
-
-        print("\t%s" % INCA_data_path) # debug
-        print("\t%s\n" % eDAQ_data_path) # debug
+        else:
+            # run with user input for specific run to use
+            run_num, INCA_data_path, eDAQ_data_path = path_find()
 
         INCA_data, eDAQ_data = data_read(INCA_data_path, eDAQ_data_path,
                                                                         run_num)
