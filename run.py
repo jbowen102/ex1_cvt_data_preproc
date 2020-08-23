@@ -2,6 +2,7 @@ import os       # Used for analyzing file paths and directories
 import wpfix    # Needed only for now-unused path_intake function.
 import csv      # Needed to read in and write out data
 import argparse # Used to parse optional command-line arguments
+import math     # Using pi to convert linear speed to angular speed.
 
 try:
     import matplotlib
@@ -29,6 +30,8 @@ class TimeStampError(Exception):
 class DataTrimError(Exception):
     pass
 
+class CVTCalcError(Exception):
+    pass
 
 # This isn't used, but I found a way to digest the input string and escape the
 # backslashes that I didn't know before.
@@ -164,9 +167,10 @@ def find_closest(t_val, t_list):
     #                                                         (t_val, time_index))
 
     # Closest val should never be farther than half the lowest sampling rate.
-    if (t_val-t_list[time_index])**2 > ((1.0/15)/2)**2:
+    # This assumes a sampling rate of 100 Hz.
+    if (t_val-t_list[time_index])**2 > ((1.0/100)/2)**2:
         raise TimeStampError("Error syncing data. Can't find close "
-                            "enough timestamp match.")
+                        "enough timestamp match (100 Hz sample rate assumed).")
 
     return time_index
 
@@ -596,6 +600,83 @@ def combine_data_arrays(INCA_data, eDAQ_data):
     return sync_array
 
 
+def calc_cvt_ratio(engine_spd, gnd_spd):
+    """Calculate and return CVT ratio (float), using given engine speed and
+    vehicle speed."""
+    # from Excel forumula:
+    # engine_spd /
+    #     (convert(convert(gnd_spd, "mi", "in"), "min", "hr") /
+    #         (pi * 0.965 * 18) *
+    #         (1.95 * 11.47)
+    #     )
+
+    rolling_radius_factor = 0.965
+    tire_diam_in = 18
+    tire_circ = math.pi * tire_diam_in * rolling_radius_factor
+
+    axle_ratio = 11.47
+    gearbox_ratio = 1.95
+
+    gnd_spd_in_min = gnd_spd * 5280 * 12/60 # ground speed in inches/min
+    tire_ang_spd = gnd_spd_in_min / tire_circ
+
+    input_shaft_ang_spd = tire_ang_spd * axle_ratio * gearbox_ratio
+
+    try:
+        return engine_spd / input_shaft_ang_spd
+    except ZeroDivisionError:
+        # If ground speed is zero, CVT ratio is infinite
+        return ""
+
+
+def add_cvt_ratio(sync_array):
+    """Add a calculated CVT ratio to each row"""
+
+    header_row_count = 2
+    # Confirm assumption that only first two rows contain headers.
+    if sync_array[header_row_count][0] != 0:
+        raise DataReadError("Bad header row count assumption. Looking for data "
+        "to start at row %d. That row starts with '%s'." % (header_row_count,
+                                        str(sync_array[header_row_count][0])))
+
+    engine_spd_col = 2
+    gnd_spd_col = 6
+    # Confirm assumptions of which columns contain engine speed and vehicle
+    # speed.
+    if "NE" not in sync_array[0][engine_spd_col]:
+        raise DataReadError("Bad engine speed column number assumption. "
+        "Expected to see 'NE' in column %d" % engine_spd_col)
+    if "Ground_Speed" not in sync_array[0][gnd_spd_col]:
+        raise DataReadError("Bad engine speed column number assumption. "
+        "Expected to see 'Ground_Speed' in column %d" % gnd_spd_col)
+
+    sync_array_w_cvt = sync_array.copy()
+
+    for row_num, row in enumerate(sync_array):
+        if row_num == 0:
+            # add new header name
+            sync_array_w_cvt[row_num] += ["", "CVT ratio (calc)"]
+        elif row_num < header_row_count:
+            # for any other rows before data starts, add padding.
+            sync_array_w_cvt[row_num] += ["", ""]
+        else:
+            # Test assumption of same 100 Hz sample rate between both data sets.
+            # Refactor to allow easy use of find_closest() every time to relax
+            # this requirement.
+            if (row[0] - row[5])**2 > ((
+                1.0/100)/2)**2:
+                raise CVTCalcError("Bad sample rate agreement assumption of"
+                                        "both data sets collected at 100 Hz.")
+            engine_spd = row[engine_spd_col]
+            gnd_spd = row[gnd_spd_col]
+
+            sync_array_w_cvt[row_num].append("")
+            sync_array_w_cvt[row_num].append(
+                                    str(calc_cvt_ratio(engine_spd, gnd_spd)))
+
+    return sync_array_w_cvt
+
+
 def write_sync_data(sync_array, full_run_num, auto_overwrite=False):
     """Writes data to file, labeled with run number."""
 
@@ -727,7 +808,9 @@ def main_prog():
         # Create unified array with both datasets
         sync_array = combine_data_arrays(INCA_data_mta, eDAQ_data_mta)
 
-        write_sync_data(sync_array, run_num, args.over)
+        sync_array_cvt = add_cvt_ratio(sync_array)
+
+        write_sync_data(sync_array_cvt, run_num, args.over)
 
 
 if __name__ == "__main__":
