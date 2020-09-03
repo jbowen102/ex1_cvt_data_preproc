@@ -15,6 +15,11 @@ except ImportError:
 # https://stackoverflow.com/questions/3496592/conditional-import-of-modules-in-python
 
 
+# global constancts
+RAW_INCA_ROOT = "./raw_data/INCA"
+RAW_EDAQ_ROOT = "./raw_data/eDAQ"
+
+
 class FilenameError(Exception):
     pass
 
@@ -32,6 +37,106 @@ class DataTrimError(Exception):
 
 class CVTCalcError(Exception):
     pass
+
+
+class RunGroup(object):
+    """"""
+    def __init__(self, auto=False):
+        # create SingleRun object for each run but don't read in data yet.
+        self.build_run_dict()
+
+        if auto:
+            # automatically process all INCA runs
+            for RunObj in self.run_dict:
+                RunObj.read_data()
+        else:
+            # prompt user for single run to process.
+            RunObj = self.prompt_for_run()
+            RunObj.read_data()
+
+    def build_run_dict(self):
+        INCA_files = os.listdir(RAW_INCA_ROOT)
+        INCA_files.sort()
+        self.run_dict = {}
+        # eliminate any directories that might be in the list
+        for i, file in enumerate(INCA_files):
+            if os.path.isdir(os.path.join(RAW_INCA_ROOT, file)):
+                continue # ignore any directories found
+            else:
+                ThisRun = self.create_run_obj(file)
+                self.run_dict[ThisRun.get_run_label()] = ThisRun
+
+    def create_run_obj(self, filename):
+        return SingleRun(os.path.join(RAW_INCA_ROOT, filename))
+        # should this return the run string instead? Does it need to return?
+
+    def prompt_for_run(self):
+        run_prompt = "Enter run num (four digits)\n> "
+        target_run_num = input(run_prompt)
+        while len(target_run_num) != 4:
+            target_run_num = input("Need a four-digit number. %s" % run_prompt)
+
+        TargetRun = self.run_dict.get(target_run_num)
+        if TargetRun:
+            return TargetRun
+        else:
+            raise FilenameError("No INCA file found for run %s" %
+                                                                target_run_num)
+
+
+class SingleRun(object):
+    def __init__(self, INCA_path):
+        self.INCA_path = INCA_path
+        self.INCA_filename = os.path.basename(self.INCA_path)
+        self.run_label = self.INCA_filename.split("_")[1][0:4]
+        # self.eDAQ_path
+
+    def read_data(self):
+        self.find_edaq_path()
+        # put check in other functions to ensure they safely fail if read_data()
+        # yet to be called.
+
+
+    def find_edaq_path(self):
+        eDAQ_file_num = self.run_label[0:2]
+
+        all_eDAQ_runs = os.listdir(RAW_EDAQ_ROOT)
+        found_eDAQ = False # initialize to false. Will change if file is found.
+        for eDAQ_run in all_eDAQ_runs:
+            if os.path.isdir(os.path.join(RAW_EDAQ_ROOT, eDAQ_run)):
+                continue # ignore any directories found
+            # Split the extension off the file name, then isolate the final two
+            # numbers off the date
+            run_num_i = os.path.splitext(eDAQ_run)[0].split("_")[1][0:2]
+            if run_num_i == eDAQ_file_num:
+                # break out of loop while "eDAQ_run" is set to correct filename
+                found_eDAQ = True
+                break
+        if found_eDAQ:
+            self.eDAQ_path = os.path.join(RAW_EDAQ_ROOT, eDAQ_run)
+        else:
+            raise FilenameError("No eDAQ file found for run %s" % eDAQ_file_num)
+
+    def get_run_label(self):
+        return self.run_label
+
+    def __str__(self):
+        return self.run_label
+
+    def __repr__(self):
+        return ("SingleRun object for INCA run %s" % self.run_label)
+
+
+MyRunGroup = RunGroup()
+
+
+class SSRun(SingleRun):
+    pass
+
+
+class DownhillRun(SingleRun):
+    pass
+
 
 # This isn't used, but I found a way to digest the input string and escape the
 # backslashes that I didn't know before.
@@ -669,8 +774,7 @@ def add_cvt_ratio(sync_array):
             # Test assumption of same 100 Hz sample rate between both data sets.
             # Refactor to allow easy use of find_closest() every time to relax
             # this requirement.
-            if (row[0] - row[5])**2 > ((
-                1.0/100)/2)**2:
+            if (row[0] - row[5])**2 > ((1.0/100)/2)**2:
                 raise CVTCalcError("Bad sample rate agreement assumption of"
                                         "both data sets collected at 100 Hz.")
             engine_spd = row[engine_spd_col]
@@ -819,5 +923,5 @@ def main_prog():
         write_sync_data(sync_array_cvt, run_num, args.over)
 
 
-if __name__ == "__main__":
-    main_prog()
+# if __name__ == "__main__":
+#     main_prog()
