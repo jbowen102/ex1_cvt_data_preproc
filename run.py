@@ -1,8 +1,9 @@
-import os       # Used for analyzing file paths and directories
-import wpfix    # Needed only for now-unused path_intake function.
-import csv      # Needed to read in and write out data
-import argparse # Used to parse optional command-line arguments
-import math     # Using pi to convert linear speed to angular speed.
+import os           # Used for analyzing file paths and directories
+import wpfix        # Needed only for now-unused path_intake function.
+import csv          # Needed to read in and write out data
+import argparse     # Used to parse optional command-line arguments
+import math         # Using pi to convert linear speed to angular speed.
+import pandas as pd # Series and DataFrame
 
 try:
     import matplotlib
@@ -18,6 +19,12 @@ except ImportError:
 # global constancts
 RAW_INCA_ROOT = "./raw_data/INCA"
 RAW_EDAQ_ROOT = "./raw_data/eDAQ"
+
+INCA_CHANNELS = ["time", "pedal_sw", "engine_spd", "throttle"]
+EDAQ_CHANNELS = ["time", "pedal_v", "gnd_speed", "pedal_sw"]
+
+INCA_HEADER_HT = 5 # how many non-data rows at top of raw INCA file.
+EDAQ_HEADER_HT = 1 # how many non-data rows at top of raw eDAQ file.
 
 
 class FilenameError(Exception):
@@ -40,7 +47,7 @@ class CVTCalcError(Exception):
 
 
 class RunGroup(object):
-    """"""
+    """Represents a collection of runs from the raw_data directory."""
     def __init__(self, auto=False):
         # create SingleRun object for each run but don't read in data yet.
         self.build_run_dict()
@@ -85,17 +92,105 @@ class RunGroup(object):
 
 
 class SingleRun(object):
+    """Represents a single run from the raw_data directory.
+    No data is read in until read_data() called.
+    """
     def __init__(self, INCA_path):
         self.INCA_path = INCA_path
         self.INCA_filename = os.path.basename(self.INCA_path)
         self.run_label = self.INCA_filename.split("_")[1][0:4]
-        # self.eDAQ_path
 
-    def read_data(self):
-        self.find_edaq_path()
         # put check in other functions to ensure they safely fail if read_data()
         # yet to be called.
 
+    def read_data(self):
+        self.find_edaq_path()
+
+        # Read in both eDAQ and INCA data for specific run.
+        # read INCA data first
+        # Open file with read priveleges.
+        # File automatically closed at end of "with/as" block.
+        with open(self.INCA_path, "r") as inca_ascii_file:
+            print("Reading INCA data from %s" % self.INCA_path) # debug
+            INCA_file_in = csv.reader(inca_ascii_file, delimiter="\t")
+            # https://stackoverflow.com/questions/7856296/parsing-csv-tab-delimited-txt-file-with-python
+
+            raw_inca_dict = {}
+            for channel in INCA_CHANNELS:
+                raw_inca_dict[channel] = []
+
+            for i, INCA_row in enumerate(INCA_file_in):
+                if i < INCA_HEADER_HT:
+                    # ignore headers
+                    continue
+                else:
+                    for n, channel in enumerate(INCA_CHANNELS):
+                        raw_inca_dict[channel].append(float(INCA_row[n]))
+
+        # Separate out time
+        inca_time_series = raw_inca_dict["time"].copy()
+        del raw_inca_dict["time"]
+
+        self.raw_inca_df = pd.DataFrame(data=raw_inca_dict, index=inca_time_series)
+        print("...done")
+
+        # now read eDAQ data
+        with open(self.eDAQ_path, "r") as edaq_ascii_file:
+            print("Reading eDAQ data from %s" % self.eDAQ_path) # debug
+            eDAQ_file_in = csv.reader(edaq_ascii_file, delimiter="\t")
+            # https://stackoverflow.com/questions/7856296/parsing-csv-tab-delimited-txt-file-with-python
+
+            raw_edaq_dict = {}
+            for channel in EDAQ_CHANNELS:
+                raw_edaq_dict[channel] = []
+
+            for j, eDAQ_row in enumerate(eDAQ_file_in):
+                if j == 0:
+                    # The first row is a list of channel names.
+                    # Loop through and find the first channel for this run.
+
+                    # converting to int and back to str strips zero padding
+                    sub_run_num = int(self.run_label[2:4])
+                    edaq_sub_run = "RN_"+str(sub_run_num)
+
+                    for n, col in enumerate(eDAQ_row):
+                        if edaq_sub_run in col:
+                            edaq_run_start_col = n
+                            break
+
+                    if n == len(eDAQ_row) - 1:
+                        # got to end of row and didn't find the run in any column heading
+                        raise DataReadError("Can't find %s in any eDAQ file" %
+                                                                edaq_sub_run)
+
+                elif j > 0 and eDAQ_row[edaq_run_start_col+1]:
+                    # Need to make sure we haven't reached end of channel strm.
+                    # Time vector may keep going past a channel's data, so look
+                    # at a run-specific channel to see if the run's ended.
+
+                    # Only add this run's channels to our data list.
+                    # Time is alwaysin first column.
+                    raw_edaq_dict["time"].append(float(eDAQ_row[0]))
+                    raw_edaq_dict["pedal_v"].append(
+                                    float(eDAQ_row[edaq_run_start_col]))
+                    raw_edaq_dict["gnd_speed"].append(
+                                    float(eDAQ_row[edaq_run_start_col+1]))
+                    raw_edaq_dict["pedal_sw"].append(
+                                    float(eDAQ_row[edaq_run_start_col+2]))
+
+        # Discard pedal voltage because it's not needed.
+        del raw_edaq_dict["pedal_v"]
+
+        # Separate out time
+        edaq_time_series = raw_edaq_dict["time"].copy()
+        del raw_edaq_dict["time"]
+
+        print(edaq_time_series[:10])
+        print(raw_edaq_dict["gnd_speed"][:10])
+        print(raw_edaq_dict["pedal_sw"][:10])
+
+        self.raw_edaq_df = pd.DataFrame(data=raw_edaq_dict, index=edaq_time_series)
+        print("...done")
 
     def find_edaq_path(self):
         eDAQ_file_num = self.run_label[0:2]
@@ -127,7 +222,10 @@ class SingleRun(object):
         return ("SingleRun object for INCA run %s" % self.run_label)
 
 
-MyRunGroup = RunGroup()
+
+    # # if first time value is nonzero, offset all time values.
+    # inca_time_offset = float(INCA_row[0])
+    # # shift time values to be relative at a zero start point.
 
 
 class SSRun(SingleRun):
@@ -233,20 +331,15 @@ def find_edaq_col_offset(header_row, sub_run_num):
     sub_run_num_edaq_format = "RN_"+str(sub_run_num)
     # converting to int (in caller function) and back to str strips zero padding
 
-    found_col = False
     for n, col in enumerate(header_row):
         if sub_run_num_edaq_format in col:
-            # save that index
-            run_start_col = n
-            found_col = True
-            break
+            # return that index
+            return n
 
-    if not found_col:
-        # got to end of row and didn't find the run in any column heading
-        raise DataReadError("Can't find %s in any eDAQ file" %
+    # got to end of row and didn't find the run in any column heading
+    raise DataReadError("Can't find %s in any eDAQ file" %
                                                         sub_run_num_edaq_format)
 
-    return run_start_col
 
 
 def find_closest(t_val, t_list):
@@ -479,13 +572,13 @@ def left_trim_data(data_dict):
 
 def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
     """Isolates important events in data by removing any long stretches of no
-    pedal input of pedal events during which the throttle position >45% or
+    pedal input of pedal events during which the throttle position >45 deg or
     whatever throt_thresh (throttle threshold) not sustained for >2 second or
     whatever thr_t_thresh.
     Should be able to get the left truncation currently performed by another
     function."""
 
-    # list of start and end times for pedal-down events with a segment of >45%
+    # list of start and end times for pedal-down events with a segment of >45deg
     # throttle for >2s.
     valid_event_times = []
 
@@ -499,7 +592,7 @@ def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
     keep = False
     for i, ti in enumerate(INCA_data["time"]):
         # Main loop evaluates pedal-down event. Stores event start and end times
-        # if inner loop determines throttle was >45% for >2s during event.
+        # if inner loop determines throttle was >45 deg for >2s during event.
         if INCA_data["pedal_sw"][i]:
             if not pedal_down:
                 print("\tPedal actuated at time\t\t%0.4fs" % ti)
@@ -507,20 +600,23 @@ def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
             pedal_down = True
             ped_buffer.append(ti) # add current time to pedal buffer.
 
-            ## Calculate throttle >45% time to determine event legitimacy
+            ## Calculate throttle >45 deg time to determine event legitimacy
             if not counting and INCA_data["throttle"][i] > throt_thresh:
-                # first time throttle exceeds 45%
-                print("\t\tThrottle >%d%% at time\t%0.4fs" % (throt_thresh, ti))
+                # first time throttle exceeds 45 deg
+                print("\t\tThrottle >%d deg at time\t%0.4fs" %
+                                                            (throt_thresh, ti))
                 high_throttle_time[0] = ti
                 counting = True
 
             elif counting and INCA_data["throttle"][i] < throt_thresh:
-                # throttle drops below 45%
-                print("\t\tThrottle <%d%% at time\t%0.4fs" % (throt_thresh, ti))
+                # throttle drops below 45 deg
+                print("\t\tThrottle <%d deg at time\t%0.4fs" %
+                                                            (throt_thresh, ti))
                 high_throttle_time[1] = INCA_data["time"][i-1] # previous time
                 delta = high_throttle_time[1] - high_throttle_time[0]
-                print("\t\tThrottle >%d%% total t:\t%0.4fs" % (throt_thresh, delta))
-                # calculate if that >45% throttle event lasted longer than 2s.
+                print("\t\tThrottle >%d deg total t:\t%0.4fs" %
+                                                        (throt_thresh, delta))
+                # calculate if that >45deg throttle event lasted longer than 2s.
                 if high_throttle_time[1] - high_throttle_time[0] > thr_t_thresh:
                     keep = True
                     # now the times stored in ped_buffer constitute a valid
@@ -549,8 +645,8 @@ def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
         # If no times were stored, then something might be wrong.
         raise DataTrimError("No valid pedal-down events found.")
 
-    # make sure if two >45% events (w/ pedal lift between) are closer that 5s,
-    # don't cut into either one. Look at each pair of end/start points, and
+    # make sure if two >45 deg events (w/ pedal lift between) are closer that
+    # 5s don't cut into either one. Look at each pair of end/start points, and
     # if they're closer than 5s, merge those two.
     previous_pair = valid_event_times[0]
     valid_event_times_c = valid_event_times.copy()
@@ -820,7 +916,7 @@ def plot_data(INCA_data_og, INCA_data_synced, run_num, auto_overwrite):
     plt.plot(INCA_data_og["time"], INCA_data_og["throttle"],
                 label="Throttle (og)")
     plt.title("INCA Throttle vs. Time (Run %s)" % run_num)
-    plt.ylabel("Throttle (%)")
+    plt.ylabel("Throttle (deg)")
     plt.legend()
     plt.setp(ax1.get_xticklabels(), visible=False)
 
@@ -830,7 +926,7 @@ def plot_data(INCA_data_og, INCA_data_synced, run_num, auto_overwrite):
     # https://matplotlib.org/3.2.1/gallery/subplots_axes_and_figures/shared_axis_demo.html#sphx-glr-gallery-subplots-axes-and-figures-shared-axis-demo-py
 
     plt.xlabel("Time (s)")
-    plt.ylabel("Throttle (%)")
+    plt.ylabel("Throttle (deg)")
     plt.legend()
 
     fig_filepath = "./figs/%s_fig.png" % run_num
@@ -856,8 +952,8 @@ def plot_data(INCA_data_og, INCA_data_synced, run_num, auto_overwrite):
 def main_prog():
     """Main program that runs automatically as long as cwd is correct."""
     # Define constants to use in isolating useful data.
-    throttle_threshold = 45
-    throttle_time_threshold = 2
+    throttle_threshold = 45 # degrees
+    throttle_time_threshold = 2 # seconds
 
     # Set up command-line argument parser
     # https://docs.python.org/3/howto/argparse.html
