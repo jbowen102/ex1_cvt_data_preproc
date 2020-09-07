@@ -26,6 +26,8 @@ EDAQ_CHANNELS = ["time", "pedal_v", "gnd_speed", "pedal_sw"]
 INCA_HEADER_HT = 5 # how many non-data rows at top of raw INCA file.
 EDAQ_HEADER_HT = 1 # how many non-data rows at top of raw eDAQ file.
 
+SAMPLING_FREQ = 100 # Hz
+
 
 class FilenameError(Exception):
     pass
@@ -56,12 +58,17 @@ class RunGroup(object):
             # automatically process all INCA runs
             for RunObj in self.run_dict:
                 RunObj.read_data()
+                RunObj.sync_data()
+
         else:
             # prompt user for single run to process.
             RunObj = self.prompt_for_run()
             RunObj.read_data()
+            RunObj.sync_data()
+
 
     def build_run_dict(self):
+        """Create dictionary with an entry for each INCA run in raw_data dir."""
         INCA_files = os.listdir(RAW_INCA_ROOT)
         INCA_files.sort()
         self.run_dict = {}
@@ -69,15 +76,24 @@ class RunGroup(object):
         for i, file in enumerate(INCA_files):
             if os.path.isdir(os.path.join(RAW_INCA_ROOT, file)):
                 continue # ignore any directories found
-            else:
-                ThisRun = self.create_run_obj(file)
-                self.run_dict[ThisRun.get_run_label()] = ThisRun
 
-    def create_run_obj(self, filename):
-        return SingleRun(os.path.join(RAW_INCA_ROOT, filename))
+            if "decel" in file.lower():
+                ThisRun = self.create_downhill_run(file)
+            else:
+                ThisRun = self.create_ss_run(file)
+
+            self.run_dict[ThisRun.get_run_label()] = ThisRun
+
+    def create_ss_run(self, filename):
+        return SSRun(os.path.join(RAW_INCA_ROOT, filename))
+        # should this return the run string instead? Does it need to return?
+
+    def create_downhill_run(self, filename):
+        return DownhillRun(os.path.join(RAW_INCA_ROOT, filename))
         # should this return the run string instead? Does it need to return?
 
     def prompt_for_run(self):
+        """Prompts user for what run to process"""
         run_prompt = "Enter run num (four digits)\n> "
         target_run_num = input(run_prompt)
         while len(target_run_num) != 4:
@@ -104,6 +120,7 @@ class SingleRun(object):
         # yet to be called.
 
     def read_data(self):
+        """Read in both INCA and eDAQ data from raw_data directory"""
         self.find_edaq_path()
 
         # Read in both eDAQ and INCA data for specific run.
@@ -159,7 +176,8 @@ class SingleRun(object):
                             break
 
                     if n == len(eDAQ_row) - 1:
-                        # got to end of row and didn't find the run in any column heading
+                        # got to end of row and didn't find the run in any
+                        # column heading
                         raise DataReadError("Can't find %s in any eDAQ file" %
                                                                 edaq_sub_run)
 
@@ -192,7 +210,60 @@ class SingleRun(object):
         self.raw_edaq_df = pd.DataFrame(data=raw_edaq_dict, index=edaq_time_series)
         print("...done")
 
+    def sync_data(self):
+
+        self.inca_df = self.raw_inca_df.copy(deep=True)
+        self.edaq_df = self.raw_edaq_df.copy(deep=True)
+        # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.copy.html
+
+        # Offset time series to start at zero.
+        self.zero_start_time()
+
+        # find first pedal high
+        # https://stackoverflow.com/questions/16683701/in-pandas-how-to-get-the-index-of-a-known-value
+        inca_high_start_t = self.inca_df.loc[
+                                        self.inca_df["pedal_sw"] == 1].index[0]
+        edaq_high_start_t = self.edaq_df.loc[
+                                        self.edaq_df["pedal_sw"] == 1].index[0]
+        print("start times (inca, edaq): %f, %f" % (inca_high_start_t,
+                                                            edaq_high_start_t))
+        # Test first to see if either data set has first pedal event earlier
+        # than 1s. If so, that's the new time for both files to line up at.
+        start_buffer = min([1.0, inca_high_start_t, edaq_high_start_t])
+        print("start buffer: %f" % start_buffer)
+
+        # truncate beginning of file, leaving short buffer before pedal down.
+        inca_target_t = inca_high_start_t - start_buffer
+        edaq_target_t = edaq_high_start_t - start_buffer
+        # find closest time value to target time
+        inca_cutoff = self.inca_df.index.get_loc(inca_target_t,
+                                method="nearest", tolerance=1/SAMPLING_FREQ)
+        edaq_cutoff = self.edaq_df.index.get_loc(edaq_target_t,
+                                method="nearest", tolerance=1/SAMPLING_FREQ)
+
+        # remove all time values before the cutoff time
+        self.inca_df = self.inca_df[self.inca_df.index[inca_cutoff]:]
+        self.edaq_df = self.edaq_df[self.edaq_df.index[edaq_cutoff]:]
+        # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.Index.get_loc.html
+
+        # Offset the time series to again start at 0.
+        self.zero_start_time()
+
+    def zero_start_time(self):
+        """If first time value in either file is nonzero, offset all to
+        zero."""
+        inca_time_offset = self.inca_df.index[0]
+        if inca_time_offset:
+            self.inca_df.set_index(self.inca_df.index - inca_time_offset,
+                                                                inplace=True)
+
+        edaq_time_offset = self.edaq_df.index[0]
+        if edaq_time_offset:
+            self.edaq_df.set_index(self.edaq_df.index - edaq_time_offset,
+                                                                inplace=True)
+
     def find_edaq_path(self):
+        """Locate path to eDAQ file corresponding to INCA run num."""
         eDAQ_file_num = self.run_label[0:2]
 
         all_eDAQ_runs = os.listdir(RAW_EDAQ_ROOT)
@@ -222,18 +293,26 @@ class SingleRun(object):
         return ("SingleRun object for INCA run %s" % self.run_label)
 
 
-
-    # # if first time value is nonzero, offset all time values.
-    # inca_time_offset = float(INCA_row[0])
-    # # shift time values to be relative at a zero start point.
-
-
 class SSRun(SingleRun):
-    pass
+    """Represents a single run with steady-state operation."""
+    # def __init__(self, INCA_path):
+        # If adding more __init__ stuff, uncomment one of the below two lines.
+        # This invokes all the actions in the parent class's __init__() method.
+        # SingleRun.__init__(self, INCA_path)
+        # super(SSRun, self).__init__(INCA_path)
+        # https://stackoverflow.com/questions/5166473/inheritance-and-init-method-in-python
+        # https://stackoverflow.com/questions/222877/what-does-super-do-in-python
+
+    def get_run_type(self):
+        return "SSRun"
 
 
 class DownhillRun(SingleRun):
-    pass
+    """Represents a single run with downhill engine-braking operation."""
+
+    def get_run_type(self):
+        return "DownhillRun"
+
 
 
 # This isn't used, but I found a way to digest the input string and escape the
@@ -339,7 +418,6 @@ def find_edaq_col_offset(header_row, sub_run_num):
     # got to end of row and didn't find the run in any column heading
     raise DataReadError("Can't find %s in any eDAQ file" %
                                                         sub_run_num_edaq_format)
-
 
 
 def find_closest(t_val, t_list):
@@ -928,6 +1006,7 @@ def plot_data(INCA_data_og, INCA_data_synced, run_num, auto_overwrite):
     plt.xlabel("Time (s)")
     plt.ylabel("Throttle (deg)")
     plt.legend()
+    # plt.legend(loc="best")
 
     fig_filepath = "./figs/%s_fig.png" % run_num
 
@@ -947,6 +1026,55 @@ def plot_data(INCA_data_og, INCA_data_synced, run_num, auto_overwrite):
     # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
     # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
     plt.clf()
+
+
+def main_prog2():
+    # Set up command-line argument parser
+    # https://docs.python.org/3/howto/argparse.html
+    # If you pass in any arguments from the command line after "python run.py",
+    # This pulls them in. If "-a" or "--auto" specified, process all data.
+    # If "-o" or "--over" specified, then overwrite any existing exports in
+    # the ./sync_data folder (without prompting).
+    # If "-p" or "-plot" specified, plot the data before and after syncing
+    # for comparison.
+    parser = argparse.ArgumentParser(description="Program to preprocess Ex1 "
+                                                "CVT data for easier analysis")
+    parser.add_argument("-a", "--auto", help="Automatically process all data "
+                                    "in raw_data folders.", action="store_true")
+    parser.add_argument("-o", "--over", help="Overwrite existing data in "
+                    "sync_data folder without prompting.", action="store_true")
+    parser.add_argument("-p", "--plot", help="Plot data before and after "
+                                            "processing.", action="store_true")
+    args = parser.parse_args()
+
+    AllRuns = RunGroup(args.auto)
+
+
+
+    ##########
+    INCA_mdata, eDAQ_mdata = sync_data(INCA_data, eDAQ_data)
+
+    INCA_mtdata = left_trim_data(INCA_mdata)
+    eDAQ_mtdata = left_trim_data(eDAQ_mdata)
+
+    # Define constants to use in isolating useful data.
+    throttle_threshold = 45 # degrees
+    throttle_time_threshold = 2 # seconds
+    # Should be able to generalize abbreviate_data() to do the job
+    # left_trim_data() is doing.
+    INCA_data_mta, eDAQ_data_mta = abbreviate_data(INCA_mtdata,
+            eDAQ_mtdata, throttle_threshold, throttle_time_threshold)
+
+    if args.plot and plot_lib_present:
+        plot_data(INCA_data, INCA_data_mta, run_num, args.over)
+
+    # Create unified array with both datasets
+    sync_array = combine_data_arrays(INCA_data_mta, eDAQ_data_mta)
+
+    sync_array_cvt = add_cvt_ratio(sync_array)
+
+    write_sync_data(sync_array_cvt, run_num, args.over)
+
 
 
 def main_prog():
