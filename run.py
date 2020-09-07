@@ -28,6 +28,8 @@ EDAQ_HEADER_HT = 1 # how many non-data rows at top of raw eDAQ file.
 
 SAMPLING_FREQ = 100 # Hz
 
+# Some case-specific constants stored in class definitions
+
 
 class FilenameError(Exception):
     pass
@@ -55,17 +57,18 @@ class RunGroup(object):
         self.build_run_dict()
 
         if auto:
-            # automatically process all INCA runs
-            for RunObj in self.run_dict:
-                RunObj.read_data()
-                RunObj.sync_data()
-
+            # automatically process all INCA runs (below)
+            runs_to_process = self.run_dict
         else:
             # prompt user for single run to process.
-            RunObj = self.prompt_for_run()
+            OnlyRun = self.prompt_for_run()
+            runs_to_process = {OnlyRun.get_run_label(): OnlyRun}
+
+        for run_num in runs_to_process:
+            RunObj = runs_to_process[run_num]
             RunObj.read_data()
             RunObj.sync_data()
-
+            RunObj.abridge_data()
 
     def build_run_dict(self):
         """Create dictionary with an entry for each INCA run in raw_data dir."""
@@ -93,7 +96,8 @@ class RunGroup(object):
         # should this return the run string instead? Does it need to return?
 
     def prompt_for_run(self):
-        """Prompts user for what run to process"""
+        """Prompts user for what run to process
+        Returns SingleRun object"""
         run_prompt = "Enter run num (four digits)\n> "
         target_run_num = input(run_prompt)
         while len(target_run_num) != 4:
@@ -203,9 +207,9 @@ class SingleRun(object):
         edaq_time_series = raw_edaq_dict["time"].copy()
         del raw_edaq_dict["time"]
 
-        print(edaq_time_series[:10])
-        print(raw_edaq_dict["gnd_speed"][:10])
-        print(raw_edaq_dict["pedal_sw"][:10])
+        # print(edaq_time_series[:10])
+        # print(raw_edaq_dict["gnd_speed"][:10])
+        # print(raw_edaq_dict["pedal_sw"][:10])
 
         self.raw_edaq_df = pd.DataFrame(data=raw_edaq_dict, index=edaq_time_series)
         print("...done")
@@ -225,12 +229,12 @@ class SingleRun(object):
                                         self.inca_df["pedal_sw"] == 1].index[0]
         edaq_high_start_t = self.edaq_df.loc[
                                         self.edaq_df["pedal_sw"] == 1].index[0]
-        print("start times (inca, edaq): %f, %f" % (inca_high_start_t,
-                                                            edaq_high_start_t))
+        # print("start times (inca, edaq): %f, %f" % (inca_high_start_t,
+        #                                                 edaq_high_start_t))
         # Test first to see if either data set has first pedal event earlier
         # than 1s. If so, that's the new time for both files to line up at.
         start_buffer = min([1.0, inca_high_start_t, edaq_high_start_t])
-        print("start buffer: %f" % start_buffer)
+        # print("start buffer: %f" % start_buffer)
 
         # truncate beginning of file, leaving short buffer before pedal down.
         inca_target_t = inca_high_start_t - start_buffer
@@ -296,12 +300,190 @@ class SingleRun(object):
 class SSRun(SingleRun):
     """Represents a single run with steady-state operation."""
     # def __init__(self, INCA_path):
-        # If adding more __init__ stuff, uncomment one of the below two lines.
         # This invokes all the actions in the parent class's __init__() method.
         # SingleRun.__init__(self, INCA_path)
         # super(SSRun, self).__init__(INCA_path)
         # https://stackoverflow.com/questions/5166473/inheritance-and-init-method-in-python
         # https://stackoverflow.com/questions/222877/what-does-super-do-in-python
+
+    def abridge_data(self):
+        """Isolates important events in data by removing any long stretches of
+        no pedal input of pedal events during which the throttle position >45
+        deg or whatever throttle threshold not sustained for >2 seconds (or
+        whatever time threshold).
+        """
+        # different version of this function in SSRun vs. DownhillRun
+
+        # Define constants used to isolating valid events.
+        self.THRTL_THRESH = 45 # degrees ("throttle threshold")
+        self.THRTL_T_THRESH = 2 # seconds ("throttle time threshold")
+
+        # list of start and end times for pedal-down events with a segment of >45deg
+        # throttle for >2s.
+        valid_event_times = []
+
+        # maintain a buffer of candidate pedal-down and throttle time vals.
+        ped_buffer = []
+        high_throttle_time = [0, 0]
+
+        print("\nSteady-state event parsing:")
+        pedal_down = False
+        counting = False
+        keep = False
+        for i, ti in enumerate(self.inca_df.index):
+            # Main loop evaluates pedal-down event. Stores event start and end
+            # times if inner loop finds throttle was >45deg for >2s during event
+            if self.inca_df["pedal_sw"][ti]:
+                if not pedal_down:
+                    print("\tPedal actuated at time\t\t%0.4fs" % ti)
+                # pedal currently down
+                pedal_down = True
+                ped_buffer.append(ti) # add current time to pedal buffer.
+
+                ## Calculate throttle >45 deg time to determine event validity
+                if not counting and (self.inca_df["throttle"][ti] >
+                                                            self.THRTL_THRESH):
+                    # first time throttle exceeds 45 deg
+                    print("\t\tThrottle >%d deg at time\t%0.4fs" %
+                                                    (self.THRTL_THRESH, ti))
+                    high_throttle_time[0] = ti
+                    counting = True
+
+                elif counting and (self.inca_df["throttle"][ti] <
+                                                            self.THRTL_THRESH):
+                    # throttle drops below 45 deg
+                    print("\t\tThrottle <%d deg at time\t%0.4fs" %
+                                                        (self.THRTL_THRESH, ti))
+                    high_throttle_time[1] = self.inca_df.index[i-1] # prev. time
+                    delta = high_throttle_time[1] - high_throttle_time[0]
+                    print("\t\tThrottle >%d deg total t:\t%0.4fs" %
+                                                    (self.THRTL_THRESH, delta))
+                    # calculate if that >45deg event lasted longer than 2s.
+                    if (high_throttle_time[1] - high_throttle_time[0] >
+                                                        self.THRTL_T_THRESH):
+                        keep = True
+                        # now the times stored in ped_buffer constitute a valid
+                        # event. As long as the pedal switch stays actuated,
+                        # subsequentn time indices will be added to ped_buffer.
+                    counting = False # reset indicator
+                    high_throttle_time = [0, 0] # reset
+
+            elif pedal_down:
+                # pedal just lifted
+                print("\tPedal lifted at time\t\t%0.4fs\n" % ti)
+                if keep:
+                    valid_event_times.append( [ped_buffer[0], ped_buffer[-1]] )
+                pedal_down = False
+                ped_buffer = [] # flush buffer
+                keep = False # reset
+            else:
+                # pedal is not currently down, and wasn't just lifted.
+                pass
+
+        print("\nValid steady-state ranges:")
+        for event_time in valid_event_times:
+            print("\t%0.3f\t->\t%0.3f" % (event_time[0], event_time[1]))
+
+        if not valid_event_times:
+            # If no times were stored, then something might be wrong.
+            raise DataTrimError("No valid pedal-down events found.")
+
+        # make sure if two >45 deg events (w/ pedal lift between) are closer
+        # than 5s, don't cut into either one. Look at each pair of end/start
+        # points, and if they're closer than 5s, merge those two.
+        previous_pair = valid_event_times[0]
+        valid_event_times_c = valid_event_times.copy()
+        for n, pair in enumerate(valid_event_times[1:]):
+            # print("\t%f - %f" % (pair[0], previous_pair[1]))
+            if pair[0] - previous_pair[1] < 5:
+                # Replace the two pairs with a single combined pair
+                del valid_event_times_c[n-1]
+                valid_event_times_c[n] = [ previous_pair[0], pair[1] ]
+            previous_pair = pair
+        print("\nAfter any merges:")
+        for event_time in valid_event_times_c:
+            print("\t%0.3f\t->\t%0.3f" % (event_time[0], event_time[1]))
+
+        # print("\nLooking for real times to use after adding buffers:")
+        # add one-second buffer to each side of valid pedal-down events.
+        for n, pair in enumerate(valid_event_times_c):
+            if n == 0 and pair[0] <= 1.0:
+                # Set zero as start value if first time is less than 1s.
+                new_start_i = 0
+            else:
+                new_start_i = self.inca_df.index.get_loc(pair[0] - 1.0,
+                                method="nearest", tolerance=1/SAMPLING_FREQ)
+
+            # print("New start: %f" % INCA_data["time"][new_start_i])
+            pair[0] = self.inca_df.index[new_start_i]
+
+            new_end_i = self.inca_df.index.get_loc(pair[1] + 1.0,
+                                    method="nearest", tolerance=1/SAMPLING_FREQ)
+            # print("New end: %f" % INCA_data["time"][new_end_i])
+            pair[1] = self.inca_df.index[new_end_i]
+
+        print("\nINCA times with 1-second buffers added:")
+        for event_time in valid_event_times_c:
+            print("\t%0.3f\t->\t%0.3f" % (event_time[0], event_time[1]))
+        print("\n")
+
+        # Split DataFrame into valid pieces; store in lists
+        valid_inca_events = []
+        valid_edaq_events = []
+
+        desired_start_t_inca = 0
+        desired_start_t_edaq = 0
+        for n, time_range in enumerate(valid_event_times_c):
+            INCA_start_i = self.inca_df.index.get_loc(time_range[0])
+            INCA_end_i = self.inca_df.index.get_loc(time_range[1])
+            edaq_match_start_i = self.edaq_df.index.get_loc(time_range[0],
+                                method="nearest", tolerance=1/SAMPLING_FREQ)
+            edaq_match_end_i = self.edaq_df.index.get_loc(time_range[1],
+                                method="nearest", tolerance=1/SAMPLING_FREQ)
+
+            # create separate DataFrames for just this event
+            valid_inca_event = self.inca_df[time_range[0]:time_range[1]]
+            valid_edaq_event = self.edaq_df[
+                                       self.edaq_df.index[edaq_match_start_i]
+                                       :self.edaq_df.index[edaq_match_end_i] ]
+
+            # shift time values to maintain continuity.
+            INCA_shift = time_range[0] - desired_start_t_inca
+            eDAQ_shift = (self.edaq_df.index[edaq_match_start_i] -
+                                                        desired_start_t_edaq)
+            print("Shift (event %d): %f" % (n, INCA_shift))
+            # print("\nShift (eDAQ): %f" % (eDAQ_shift))
+            valid_inca_event.set_index(valid_inca_event.index - INCA_shift,
+                                                                 inplace=True)
+            valid_edaq_event.set_index(valid_edaq_event.index - eDAQ_shift,
+                                                                 inplace=True)
+
+            # Add events to lists
+            valid_inca_events.append(valid_inca_event)
+            valid_edaq_events.append(valid_edaq_event)
+
+            # define next start time to be next time value after new vector's
+            # end time.
+            desired_start_t_inca = self.inca_df.index[
+                        self.inca_df.index.get_loc(time_range[1] - INCA_shift,
+                                method="nearest", tolerance=1/SAMPLING_FREQ)]
+
+            desired_start_t_edaq = self.edaq_df.index[
+                        self.edaq_df.index.get_loc(desired_start_t_inca,
+                                method="nearest", tolerance=1/SAMPLING_FREQ)]
+            # print("desired start times (INCA/eDAQ): %f, %f" %
+            # (desired_start_t_inca, desired_start_t_edaq))
+
+        # Now re-assemble the DataFrame with only valid events.
+        # https://pandas.pydata.org/pandas-docs/stable/user_guide/merging.html
+        self.inca_df = pd.concat(valid_inca_events)
+        self.edaq_df = pd.concat(valid_edaq_events)
+
+        print("\nINCA file time span: %f -> %f (%d data points)" %
+       (self.inca_df.index[0], self.inca_df.index[-1], len(self.inca_df.index)))
+        print("eDAQ file time span: %f -> %f (%d data points)" %
+       (self.edaq_df.index[0], self.edaq_df.index[-1], len(self.edaq_df.index)))
+
 
     def get_run_type(self):
         return "SSRun"
@@ -309,6 +491,9 @@ class SSRun(SingleRun):
 
 class DownhillRun(SingleRun):
     """Represents a single run with downhill engine-braking operation."""
+
+    def abridge_data(self):
+        pass
 
     def get_run_type(self):
         return "DownhillRun"
@@ -1050,21 +1235,7 @@ def main_prog2():
     AllRuns = RunGroup(args.auto)
 
 
-
     ##########
-    INCA_mdata, eDAQ_mdata = sync_data(INCA_data, eDAQ_data)
-
-    INCA_mtdata = left_trim_data(INCA_mdata)
-    eDAQ_mtdata = left_trim_data(eDAQ_mdata)
-
-    # Define constants to use in isolating useful data.
-    throttle_threshold = 45 # degrees
-    throttle_time_threshold = 2 # seconds
-    # Should be able to generalize abbreviate_data() to do the job
-    # left_trim_data() is doing.
-    INCA_data_mta, eDAQ_data_mta = abbreviate_data(INCA_mtdata,
-            eDAQ_mtdata, throttle_threshold, throttle_time_threshold)
-
     if args.plot and plot_lib_present:
         plot_data(INCA_data, INCA_data_mta, run_num, args.over)
 
@@ -1149,3 +1320,5 @@ def main_prog():
 
 # if __name__ == "__main__":
 #     main_prog()
+# if __name__ == "__main__":
+#     main_prog2()
