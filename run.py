@@ -397,7 +397,7 @@ def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
         # if inner loop determines throttle was >45% for >2s during event.
         if INCA_data["pedal_sw"][i]:
             if not pedal_down:
-                print("\tPedal goes high at time\t\t%0.4fs" % ti)
+                print("\tPedal actuated at time\t\t%0.4fs" % ti)
             # pedal currently down
             pedal_down = True
             ped_buffer.append(ti) # add current time to pedal buffer.
@@ -476,8 +476,9 @@ def abbreviate_data(INCA_data, eDAQ_data, throt_thresh, thr_t_thresh):
         # print("New end: %f" % INCA_data["time"][new_end])
         pair[1] = INCA_data["time"][new_end]
 
-        if n == 0 and new_start != 0:
-            raise DataTrimError("INCA time vector no longer starting at 0.")
+        # print("\nnew_start: %f" % new_start)
+        # if n == 0 and new_start != 0:
+        #     raise DataTrimError("INCA time vector no longer starting at 0.")
 
     print("\nINCA times with 1-second buffers added:")
     for event_time in valid_event_times_c:
@@ -621,10 +622,12 @@ def calc_cvt_ratio(engine_spd, gnd_spd):
     tire_ang_spd = gnd_spd_in_min / tire_circ
 
     input_shaft_ang_spd = tire_ang_spd * axle_ratio * gearbox_ratio
+    if input_shaft_ang_spd == 0:
+        # If ground speed is zero, CVT ratio is infinite
+        return ""
 
     cvt_ratio = engine_spd / input_shaft_ang_spd
-    if input_shaft_ang_spd == 0 or cvt_ratio == 0 or cvt_ratio > 5:
-        # If ground speed is zero, CVT ratio is infinite
+    if cvt_ratio == 0 or cvt_ratio > 5:
         # EX1 CVT can't be above 5, so if it appears to be, then clutch is
         # disengaged and CVT ratio can't be calculated this way.
         return ""
