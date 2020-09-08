@@ -10,9 +10,9 @@ try:
     matplotlib.use("Agg") # no UI backend for use w/ WSL
     # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
     import matplotlib.pyplot as plt # Needed for optional data plotting.
-    plot_lib_present = True
+    PLOT_LIB_PRESENT = True
 except ImportError:
-    plot_lib_present = False
+    PLOT_LIB_PRESENT = False
 # https://stackoverflow.com/questions/3496592/conditional-import-of-modules-in-python
 
 
@@ -52,20 +52,20 @@ class CVTCalcError(Exception):
 
 class RunGroup(object):
     """Represents a collection of runs from the raw_data directory."""
-    def __init__(self, auto=False):
+    def __init__(self, process_all=False):
         # create SingleRun object for each run but don't read in data yet.
         self.build_run_dict()
 
-        if auto:
+        if process_all:
             # automatically process all INCA runs (below)
-            runs_to_process = self.run_dict
+            self.runs_to_process = self.run_dict
         else:
             # prompt user for single run to process.
             OnlyRun = self.prompt_for_run()
-            runs_to_process = {OnlyRun.get_run_label(): OnlyRun}
+            self.runs_to_process = {OnlyRun.get_run_label(): OnlyRun}
 
-        for run_num in runs_to_process:
-            RunObj = runs_to_process[run_num]
+        for run_num in self.runs_to_process:
+            RunObj = self.runs_to_process[run_num]
             RunObj.read_data()
             RunObj.sync_data()
             RunObj.abridge_data()
@@ -94,6 +94,12 @@ class RunGroup(object):
     def create_downhill_run(self, filename):
         return DownhillRun(os.path.join(RAW_INCA_ROOT, filename))
         # should this return the run string instead? Does it need to return?
+
+    def plot_runs(self, overwrite=False):
+        # If only one run in group is to be processed, this will only loop once.
+        for run_num in self.runs_to_process:
+            RunObj = self.runs_to_process[run_num]
+            RunObj.plot_data(overwrite)
 
     def prompt_for_run(self):
         """Prompts user for what run to process
@@ -152,7 +158,8 @@ class SingleRun(object):
         inca_time_series = raw_inca_dict["time"].copy()
         del raw_inca_dict["time"]
 
-        self.raw_inca_df = pd.DataFrame(data=raw_inca_dict, index=inca_time_series)
+        self.raw_inca_df = pd.DataFrame(data=raw_inca_dict,
+                                                        index=inca_time_series)
         print("...done")
 
         # now read eDAQ data
@@ -211,7 +218,8 @@ class SingleRun(object):
         # print(raw_edaq_dict["gnd_speed"][:10])
         # print(raw_edaq_dict["pedal_sw"][:10])
 
-        self.raw_edaq_df = pd.DataFrame(data=raw_edaq_dict, index=edaq_time_series)
+        self.raw_edaq_df = pd.DataFrame(data=raw_edaq_dict,
+                                                        index=edaq_time_series)
         print("...done")
 
     def sync_data(self):
@@ -265,6 +273,47 @@ class SingleRun(object):
         if edaq_time_offset:
             self.edaq_df.set_index(self.edaq_df.index - edaq_time_offset,
                                                                 inplace=True)
+
+    def plot_data(self, overwrite=False):
+        print("Plotting data")
+
+        # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
+        ax1 = plt.subplot(211)
+        plt.plot(self.raw_inca_df.index, self.raw_inca_df["throttle"],
+                                                        label="Throttle (og)")
+        plt.title("INCA Throttle vs. Time (Run %s)" % self.run_label)
+        plt.ylabel("Throttle (deg)")
+        plt.legend()
+        plt.setp(ax1.get_xticklabels(), visible=False)
+
+        ax2 = plt.subplot(212, sharex=ax1, sharey=ax1)
+        plt.plot(self.inca_df.index, self.inca_df["throttle"],
+                                                    label="Throttle (synced)")
+        # https://matplotlib.org/3.2.1/gallery/subplots_axes_and_figures/shared_axis_demo.html#sphx-glr-gallery-subplots-axes-and-figures-shared-axis-demo-py
+
+        plt.xlabel("Time (s)")
+        plt.ylabel("Throttle (deg)")
+        plt.legend()
+        # plt.legend(loc="best")
+
+        fig_filepath = "./figs/%s_fig.png" % self.run_label
+
+        if os.path.exists(fig_filepath) and not overwrite:
+            ow_answer = ""
+            while ow_answer.lower() not in ["y", "n"]:
+                ow_answer = input("\n%s already exists in figs folder. "
+                        "Overwrite? (Y/N)\n> " % os.path.basename(fig_filepath))
+            if ow_answer.lower() == "n":
+                plt.clf()
+                return
+
+        print("\nExporting plot as %s..." % os.path.basename(fig_filepath))
+        plt.savefig(fig_filepath)
+        print("...done")
+        # plt.show() # can't use w/ WSL.
+        # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
+        # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
+        plt.clf()
 
     def find_edaq_path(self):
         """Locate path to eDAQ file corresponding to INCA run num."""
@@ -1234,17 +1283,16 @@ def main_prog2():
 
     AllRuns = RunGroup(args.auto)
 
+    if args.plot and PLOT_LIB_PRESENT:
+        AllRuns.plot_runs(args.over)
 
     ##########
-    if args.plot and plot_lib_present:
-        plot_data(INCA_data, INCA_data_mta, run_num, args.over)
-
-    # Create unified array with both datasets
-    sync_array = combine_data_arrays(INCA_data_mta, eDAQ_data_mta)
-
-    sync_array_cvt = add_cvt_ratio(sync_array)
-
-    write_sync_data(sync_array_cvt, run_num, args.over)
+    # # Create unified array with both datasets
+    # sync_array = combine_data_arrays(INCA_data_mta, eDAQ_data_mta)
+    #
+    # sync_array_cvt = add_cvt_ratio(sync_array)
+    #
+    # write_sync_data(sync_array_cvt, run_num, args.over)
 
 
 
@@ -1307,7 +1355,7 @@ def main_prog():
         INCA_data_mta, eDAQ_data_mta = abbreviate_data(INCA_mtdata,
                 eDAQ_mtdata, throttle_threshold, throttle_time_threshold)
 
-        if args.plot and plot_lib_present:
+        if args.plot and PLOT_LIB_PRESENT:
             plot_data(INCA_data, INCA_data_mta, run_num, args.over)
 
         # Create unified array with both datasets
@@ -1320,5 +1368,5 @@ def main_prog():
 
 # if __name__ == "__main__":
 #     main_prog()
-# if __name__ == "__main__":
-#     main_prog2()
+if __name__ == "__main__":
+    main_prog2()
