@@ -2,7 +2,7 @@ import os           # Used for analyzing file paths and directories
 import csv          # Needed to read in and write out data
 import argparse     # Used to parse optional command-line arguments
 import math         # Using pi to convert linear speed to angular speed.
-import pandas as pd # Series and DataFrame
+import pandas as pd # Series and DataFrame structures
 
 try:
     import matplotlib
@@ -72,9 +72,7 @@ class RunGroup(object):
 
         for run_num in self.runs_to_process:
             RunObj = self.runs_to_process[run_num]
-            RunObj.read_data()
-            RunObj.sync_data()
-            RunObj.abridge_data()
+            RunObj.process_data()
 
     def build_run_dict(self):
         """Create dictionary with an entry for each INCA run in raw_data dir."""
@@ -143,6 +141,12 @@ class SingleRun(object):
 
         # put check in other functions to ensure they safely fail if read_data()
         # yet to be called.
+
+    def process_data(self):
+        self.read_data()
+        self.sync_data()
+        self.abridge_data()
+        self.add_math_channels()
 
     def read_data(self):
         """Read in both INCA and eDAQ data from raw_data directory"""
@@ -315,9 +319,32 @@ class SingleRun(object):
         shifted_time_series = df.index + offset_val
         df.set_index(shifted_time_series, inplace=True)
 
-    def plot_data(self, overwrite=False):
-        # print("Plotting data")
+    def add_math_channels(self):
+        self.add_cvt_ratio()
 
+    def add_cvt_ratio(self):
+        ROLLING_RADIUS_FACTOR = 0.965
+        TIRE_DIAM_IN = 18 # inches
+        tire_circ = math.pi * TIRE_DIAM_IN * ROLLING_RADIUS_FACTOR
+
+        AXLE_RATIO = 11.47
+        GEARBOX_RATIO = 1.95
+
+        gnd_spd_in_min = self.sync_df["gnd_speed"] * 5280 * 12/60
+        # ground speed in inches/min
+
+        tire_ang_spd = gnd_spd_in_min / tire_circ
+        input_shaft_ang_spd = tire_ang_spd * AXLE_RATIO * GEARBOX_RATIO
+        cvt_ratio = self.sync_df["engine_spd"] / input_shaft_ang_spd
+
+        # Remove any values that are zero or > 5 (including infinite).
+        cvt_ratio[cvt_ratio > 5] = 0
+        cvt_ratio[cvt_ratio == 0] = ""
+
+        self.sync_df["CVT_ratio_calc"] = cvt_ratio
+        CHANNEL_UNITS["CVT_ratio_calc"] = "rpm/rpm"
+
+    def plot_data(self, overwrite=False):
         # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
         ax1 = plt.subplot(211)
         plt.plot(self.raw_inca_df.index, self.raw_inca_df["throttle"],
@@ -381,9 +408,6 @@ class SingleRun(object):
         sync_array.insert(0, header_rows[1])
         sync_array.insert(0, header_rows[0])
 
-        # Just using external function for now to get it working.
-        sync_array_w_cvt = add_cvt_ratio(sync_array)
-
         # Create new CSV file and write out. Closes automatically at end of
         # with/as block.
         sync_basename = "%s_Sync.csv" % self.run_label
@@ -405,7 +429,6 @@ class SingleRun(object):
             print("\nWriting combined data to %s..." % sync_filename)
             sync_file_csv.writerows(sync_array)
             print("...done")
-
 
     def find_edaq_path(self):
         """Locate path to eDAQ file corresponding to INCA run num."""
@@ -617,82 +640,6 @@ class DownhillRun(SingleRun):
 
     def get_run_type(self):
         return "DownhillRun"
-
-
-def calc_cvt_ratio(engine_spd, gnd_spd):
-    """Calculate and return CVT ratio (float), using given engine speed and
-    vehicle speed."""
-    # from Excel forumula:
-    #   engine_spd
-    #   / (convert(convert(gnd_spd, "mi", "in"), "min", "hr")
-    #      / (pi * 0.965 * 18)
-    #      * (1.95 * 11.47)
-    #     )
-
-    rolling_radius_factor = 0.965
-    tire_diam_in = 18
-    tire_circ = math.pi * tire_diam_in * rolling_radius_factor
-
-    axle_ratio = 11.47
-    gearbox_ratio = 1.95
-
-    gnd_spd_in_min = gnd_spd * 5280 * 12/60 # ground speed in inches/min
-    tire_ang_spd = gnd_spd_in_min / tire_circ
-
-    input_shaft_ang_spd = tire_ang_spd * axle_ratio * gearbox_ratio
-    if input_shaft_ang_spd == 0:
-        # If ground speed is zero, CVT ratio is infinite
-        return ""
-
-    cvt_ratio = engine_spd / input_shaft_ang_spd
-    if cvt_ratio == 0 or cvt_ratio > 5:
-        # EX1 CVT can't be above 5, so if it appears to be, then clutch is
-        # disengaged and CVT ratio can't be calculated this way.
-        return ""
-    else:
-        return cvt_ratio
-
-
-def add_cvt_ratio(sync_array):
-    """Add a calculated CVT ratio to each row"""
-
-    header_row_count = 2
-    # Confirm assumption that only first two rows contain headers.
-    if sync_array[header_row_count][0] != 0:
-        raise DataReadError("Bad header row count assumption. Looking for data "
-        "to start at row %d. That row starts with '%s'." % (header_row_count,
-                                        str(sync_array[header_row_count][0])))
-
-    engine_spd_col = 2
-    gnd_spd_col = 4
-    # Confirm assumptions of which columns contain engine speed and vehicle
-    # speed.
-    if not "engine_spd" in sync_array[0][engine_spd_col]:
-        raise DataReadError("Bad engine speed column number assumption. "
-        "Expected to see 'engine_spd' in column %d" % engine_spd_col)
-    if not "gnd_speed" in sync_array[0][gnd_spd_col]:
-        raise DataReadError("Bad engine speed column number assumption. "
-            "Expected to see 'gnd_speed' in column %d" % gnd_spd_col)
-
-    sync_array_w_cvt = sync_array.copy()
-
-    for row_num, row in enumerate(sync_array):
-        if row_num == 0:
-            # add new header name
-            sync_array_w_cvt[row_num] += ["CVT ratio (calc)"]
-        elif row_num == 1:
-            sync_array_w_cvt[row_num] += ["rpm/rpm"]
-        elif row_num < header_row_count:
-            # for any other rows before data starts, add padding.
-            sync_array_w_cvt[row_num] += [""]
-        else:
-            engine_spd = row[engine_spd_col]
-            gnd_spd = row[gnd_spd_col]
-
-            sync_array_w_cvt[row_num].append(
-                                            calc_cvt_ratio(engine_spd, gnd_spd))
-
-    return sync_array_w_cvt
 
 
 def main_prog2():
