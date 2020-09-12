@@ -243,12 +243,15 @@ class SingleRun(object):
         # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.copy.html
 
         # Offset time series to start at zero.
-        self.zero_start_time()
+        self.shift_time_series(self.inca_df, zero=True)
+        self.shift_time_series(self.edaq_df, zero=True)
+
         # Convert index from seconds to hundredths of a second
         self.inca_df.set_index(pd.Index([int(round(ti * SAMPLING_FREQ))
                                 for ti in self.inca_df.index]), inplace=True)
         self.edaq_df.set_index(pd.Index([int(round(ti * SAMPLING_FREQ))
                                 for ti in self.edaq_df.index]), inplace=True)
+        # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.set_index.html
 
         # Check if any pedal events exist
         if self.inca_df.loc[self.inca_df["pedal_sw"] == 1].empty:
@@ -265,69 +268,50 @@ class SingleRun(object):
                                         self.inca_df["pedal_sw"] == 1].index[0]
         edaq_high_start_t = self.edaq_df.loc[
                                         self.edaq_df["pedal_sw"] == 1].index[0]
-        # print("start times (inca, edaq): %f, %f" % (inca_high_start_t,
-        #                                                 edaq_high_start_t))
+        print("start times (inca, edaq): %f, %f" % (inca_high_start_t,
+                                                        edaq_high_start_t))
 
         # Test first to see if either data set has first pedal event earlier
         # than 1s. If so, that's the new time for both files to line up at.
         start_buffer = min([1 * SAMPLING_FREQ, inca_high_start_t,
                                                             edaq_high_start_t])
-        # print("start buffer: %f" % start_buffer)
+        print("start buffer: %f" % start_buffer)
 
-        # truncate beginning of file, leaving short buffer before pedal down.
+        # shift time values, leaving negative values in early part of file that
+        # will be trimmed off below.
         inca_target_t = inca_high_start_t - start_buffer
         edaq_target_t = edaq_high_start_t - start_buffer
-        # find closest time value to target time
-        inca_cutoff = self.inca_df.index.get_loc(inca_target_t,
-                                                method="nearest", tolerance=1)
-        edaq_cutoff = self.edaq_df.index.get_loc(edaq_target_t,
-                                                method="nearest", tolerance=1)
-        # tolerance is really (1/SAMPLING_FREQ)*SAMPLING_FREQ = 1
 
-        # remove all time values before the cutoff time
-        self.inca_df = self.inca_df[self.inca_df.index[inca_cutoff]:]
-        self.edaq_df = self.edaq_df[self.edaq_df.index[edaq_cutoff]:]
-        # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.Index.get_loc.html
+        self.shift_time_series(self.inca_df, offset_val=-inca_target_t)
+        self.shift_time_series(self.edaq_df, offset_val=-edaq_target_t)
 
-        # Offset the time series to again start at 0.
-        self.zero_start_time()
+        print("new inca index start: %d" % self.inca_df.index[0])
+        print("new edaq index start: %d" % self.edaq_df.index[0])
 
         # Unify datasets into one DataFrame
-        # Truncate longer file
-        len_diff = len(self.inca_df) - len(self.edaq_df)
-        if len_diff > 0: # inca_df longer than edaq_df
-            self.inca_df = self.inca_df[:self.inca_df.index[-abs(len_diff) - 1]]
-            # Need th extra one because DataFrame slicing not same as list.
-        elif len_diff < 0:
-            self.edaq_df = self.edaq_df[:self.edaq_df.index[-abs(len_diff) - 1]]
-        else: # same length
-            pass
+        # Slice out values before t=0 (1s before first pedal press)
+        # Automatically truncates longer data set
+        self.sync_df = pd.merge(self.inca_df.loc[0:],
+                                self.edaq_df["gnd_speed"].loc[0:],
+                                left_index=True, right_index=True)
+        print(len(self.inca_df))
+        print(len(self.inca_df.loc[0:]))
+        print(len(self.edaq_df))
+        print(len(self.edaq_df.loc[0:]))
+        input(len(self.sync_df))
 
-        # can trimming of data be done automatically during a merge?
-        # can pandas match up first pedal event automatically?
+    def shift_time_series(self, df, zero=False, offset_val=None):
+        """If offset_val param specified, add this signed value to all time
+        values.
+        If zero param passed, offset all such that first val is 0."""
+        if zero:
+            offset_val = -df.index[0]
+        elif not offset_val:
+            raise DataSyncError("shift_time_series needs either zero or "
+                                                    "offset_val param.")
 
-        # combine dataframes
-        # newdf = pd.merge(mydf1, mydf2["gnd_speed"], left_index=True, right_index=True)
-            # want to get merge to work
-        # mydf3.loc[:, "gnd_speed"] = mydf2["gnd_speed"]
-            # some values left out where indices barely mismatch
-        # mydf3.loc[:, "gnd_speed"] = mydf2["gnd_speed"].tolist()
-            # works
-
-    def zero_start_time(self):
-        """If first time value in either file is nonzero, offset all to
-        zero."""
-        inca_time_offset = self.inca_df.index[0]
-        if inca_time_offset:
-            shifted_time_series = self.inca_df.index - inca_time_offset
-            self.inca_df.set_index(shifted_time_series, inplace=True)
-            # self.inca_df.set_index(
-            # [round(ti, 2) for ti in shifted_time_series.tolist()], inplace=True)
-
-        edaq_time_offset = self.edaq_df.index[0]
-        if edaq_time_offset:
-            shifted_time_series = self.edaq_df.index - edaq_time_offset
-            self.edaq_df.set_index(shifted_time_series, inplace=True)
+        shifted_time_series = df.index + offset_val
+        df.set_index(shifted_time_series, inplace=True)
 
     def plot_data(self, overwrite=False):
         print("Plotting data")
