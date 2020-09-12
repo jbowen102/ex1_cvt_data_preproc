@@ -126,8 +126,10 @@ class RunGroup(object):
         if TargetRun:
             return TargetRun
         else:
-            raise FilenameError("No INCA file found for run %s" %
-                                                                target_run_num)
+            print("No INCA file found matching that run.")
+            return self.prompt_for_run()
+            # raise FilenameError("No INCA file found for run %s" %
+            #                                                     target_run_num)
 
 
 class SingleRun(object):
@@ -268,8 +270,9 @@ class SingleRun(object):
                                         self.inca_df["pedal_sw"] == 1].index[0]
         edaq_high_start_t = self.edaq_df.loc[
                                         self.edaq_df["pedal_sw"] == 1].index[0]
-        print("start times (inca, edaq): %f, %f" % (inca_high_start_t,
-                                                        edaq_high_start_t))
+        print("Start times (inca, edaq): %.2fs, %.2fs"
+                                        % (inca_high_start_t / SAMPLING_FREQ,
+                                           edaq_high_start_t / SAMPLING_FREQ))
 
         # Test first to see if either data set has first pedal event earlier
         # than 1s. If so, that's the new time for both files to line up at.
@@ -313,15 +316,15 @@ class SingleRun(object):
         df.set_index(shifted_time_series, inplace=True)
 
     def plot_data(self, overwrite=False):
-        print("Plotting data")
+        # print("Plotting data")
 
         # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
         ax1 = plt.subplot(211)
         plt.plot(self.raw_inca_df.index, self.raw_inca_df["throttle"],
                                                         label="Throttle (og)")
-        plt.title("INCA Throttle vs. Time (Run %s)" % self.run_label)
+        plt.title("Throttle vs. Time (Run %s)" % self.run_label)
         plt.ylabel("Throttle (deg)")
-        plt.legend()
+        plt.legend(loc="best")
         plt.setp(ax1.get_xticklabels(), visible=False)
 
         ax2 = plt.subplot(212, sharex=ax1, sharey=ax1)
@@ -347,7 +350,7 @@ class SingleRun(object):
                 plt.clf()
                 return
 
-        print("\nExporting plot as %s..." % os.path.basename(fig_filepath))
+        print("\nExporting plot as %s..." % fig_filepath)
         plt.savefig(fig_filepath)
         print("...done")
         # plt.show() # can't use w/ WSL.
@@ -358,52 +361,25 @@ class SingleRun(object):
     def export_data(self, overwrite=False):
         # Create to list of lists for easier writing out
         # Convert time values from hundredths of a second to seconds
-        inca_indices = [round(ti/SAMPLING_FREQ,2)
-                                    for ti in self.inca_df.index.tolist()]
-        edaq_indices = [round(ti/SAMPLING_FREQ,2)
-                                    for ti in self.edaq_df.index.tolist()]
-        inca_data_array = self.inca_df.values.tolist()
-        edaq_data_array = self.edaq_df.values.tolist()
+        time_series = [round(ti/SAMPLING_FREQ,2)
+                                    for ti in self.sync_df.index.tolist()]
+
+        sync_array = self.sync_df.values.tolist()
         # https://stackoverflow.com/questions/28006793/pandas-dataframe-to-list-of-lists
 
-        # always put INCA data on the left.
-        sync_array = inca_data_array[:]
-        for line_no, inca_line in enumerate(sync_array):
+        # for line_no, inca_line in enumerate(sync_array):
+        for line_no, line in enumerate(sync_array):
             # put in time values
-            sync_array[line_no].insert(0, inca_indices[line_no])
+            sync_array[line_no].insert(0, time_series[line_no])
             # https://stackoverflow.com/questions/8537916/whats-the-idiomatic-syntax-for-prepending-to-a-short-python-list
-        # Base it off longer file so no data gets cut off.
-        if len(inca_data_array) > len(edaq_data_array):
-            for line_no, edaq_line in enumerate(edaq_data_array):
-                sync_array[line_no].append("")
-                # sync_array[line_no] += edaq_indices[line_no]
-                sync_array[line_no].append(edaq_indices[line_no])
-                sync_array[line_no] += edaq_line
-        else:
-            for line_no, edaq_line in enumerate(edaq_data_array):
-                if len(inca_data_array) >= line_no + 1:
-                    # Copy INCA data unless it runs out.
-                    sync_array[line_no] += [""]
-                    # sync_array[line_no] += edaq_indices[line_no]
-                    sync_array[line_no].append(edaq_indices[line_no])
-                    sync_array[line_no] += edaq_line
-                else:
-                    # If eDAQ data contains more points, pad columns
-                    sync_array.append([""]*len(INCA_CHANNELS) + edaq_line)
 
         # Format header rows
-        inca_header = [INCA_CHANNELS[:],
-                                    [CHANNEL_UNITS[c] for c in INCA_CHANNELS]]
-        edaq_header = [EDAQ_CHANNELS[:],
-                                    [CHANNEL_UNITS[c] for c in EDAQ_CHANNELS]]
-        # Remove pedal voltage
-        edaq_header[0].remove("pedal_v")
-        edaq_header[1].remove("V")
-        # https://note.nkmk.me/en/python-list-clear-pop-remove-del/
+        channel_list = ["time"] + self.sync_df.columns.tolist()
+        header_rows = [channel_list, [CHANNEL_UNITS[c] for c in channel_list]]
 
         # Add headers to array
-        sync_array.insert(0, inca_header[1] + [""] + edaq_header[1])
-        sync_array.insert(0, inca_header[0] + [""] + edaq_header[0])
+        sync_array.insert(0, header_rows[1])
+        sync_array.insert(0, header_rows[0])
 
         # Just using external function for now to get it working.
         sync_array_w_cvt = add_cvt_ratio(sync_array)
@@ -426,9 +402,9 @@ class SingleRun(object):
         with open(sync_filename, 'w+') as sync_file:
             sync_file_csv = csv.writer(sync_file, dialect="excel")
 
-            print("\nWriting combined data to %s..." % sync_basename)
+            print("\nWriting combined data to %s..." % sync_filename)
             sync_file_csv.writerows(sync_array)
-            print("...done\n")
+            print("...done")
 
 
     def find_edaq_path(self):
@@ -610,7 +586,7 @@ class SSRun(SingleRun):
 
             # shift time values to maintain continuity.
             shift = time_range[0] - desired_start_t
-            print("Shift (event %d): %f" % (n, shift / SAMPLING_FREQ))
+            print("Shift (event %d): %.2f" % (n, shift / SAMPLING_FREQ))
 
             self.shift_time_series(valid_event, offset_val=-shift)
 
@@ -625,7 +601,7 @@ class SSRun(SingleRun):
         # https://pandas.pydata.org/pandas-docs/stable/user_guide/merging.html
         self.sync_df = pd.concat(valid_events)
 
-        print("\nData time span: %f -> %f (%d data points)" %
+        print("\nData time span: %.2f -> %.2f (%d data points)" %
                (self.sync_df.index[0]/SAMPLING_FREQ,
                 self.sync_df.index[-1]/SAMPLING_FREQ, len(self.sync_df.index)))
 
@@ -647,10 +623,10 @@ def calc_cvt_ratio(engine_spd, gnd_spd):
     """Calculate and return CVT ratio (float), using given engine speed and
     vehicle speed."""
     # from Excel forumula:
-    # engine_spd /
-    #     (convert(convert(gnd_spd, "mi", "in"), "min", "hr") /
-    #         (pi * 0.965 * 18) *
-    #         (1.95 * 11.47)
+    #   engine_spd
+    #   / (convert(convert(gnd_spd, "mi", "in"), "min", "hr")
+    #      / (pi * 0.965 * 18)
+    #      * (1.95 * 11.47)
     #     )
 
     rolling_radius_factor = 0.965
@@ -688,13 +664,13 @@ def add_cvt_ratio(sync_array):
                                         str(sync_array[header_row_count][0])))
 
     engine_spd_col = 2
-    gnd_spd_col = 6
+    gnd_spd_col = 4
     # Confirm assumptions of which columns contain engine speed and vehicle
     # speed.
     if not "engine_spd" in sync_array[0][engine_spd_col]:
         raise DataReadError("Bad engine speed column number assumption. "
         "Expected to see 'engine_spd' in column %d" % engine_spd_col)
-    if not ("gnd_speed" in sync_array[0][gnd_spd_col]):
+    if not "gnd_speed" in sync_array[0][gnd_spd_col]:
         raise DataReadError("Bad engine speed column number assumption. "
             "Expected to see 'gnd_speed' in column %d" % gnd_spd_col)
 
@@ -703,25 +679,18 @@ def add_cvt_ratio(sync_array):
     for row_num, row in enumerate(sync_array):
         if row_num == 0:
             # add new header name
-            sync_array_w_cvt[row_num] += ["", "CVT ratio (calc)"]
+            sync_array_w_cvt[row_num] += ["CVT ratio (calc)"]
         elif row_num == 1:
-            sync_array_w_cvt[row_num] += ["", "rpm/rpm"]
+            sync_array_w_cvt[row_num] += ["rpm/rpm"]
         elif row_num < header_row_count:
             # for any other rows before data starts, add padding.
-            sync_array_w_cvt[row_num] += ["", ""]
+            sync_array_w_cvt[row_num] += [""]
         else:
-            # Test assumption of same 100 Hz sample rate between both data sets.
-            # Refactor to allow easy use of find_closest() every time to relax
-            # this requirement.
-            if (row[0] - row[5])**2 > ((1.0/SAMPLING_FREQ)/2)**2:
-                raise CVTCalcError("Bad sample rate agreement assumption of"
-                                        "both data sets collected at 100 Hz.")
             engine_spd = row[engine_spd_col]
             gnd_spd = row[gnd_spd_col]
 
-            sync_array_w_cvt[row_num].append("")
             sync_array_w_cvt[row_num].append(
-                                    str(calc_cvt_ratio(engine_spd, gnd_spd)))
+                                            calc_cvt_ratio(engine_spd, gnd_spd))
 
     return sync_array_w_cvt
 
@@ -749,6 +718,8 @@ def main_prog2():
 
     if args.plot and PLOT_LIB_PRESENT:
         AllRuns.plot_runs(args.over)
+    elif args.plot:
+        print("\nFailed to import matplotlib. Cannot plot data.")
 
     AllRuns.export_runs(args.over)
 
