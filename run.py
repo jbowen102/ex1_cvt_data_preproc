@@ -126,8 +126,6 @@ class RunGroup(object):
         else:
             print("No INCA file found matching that run.")
             return self.prompt_for_run()
-            # raise FilenameError("No INCA file found for run %s" %
-            #                                                     target_run_num)
 
 
 class SingleRun(object):
@@ -139,14 +137,37 @@ class SingleRun(object):
         self.INCA_filename = os.path.basename(self.INCA_path)
         self.run_label = self.INCA_filename.split("_")[1][0:4]
 
-        # put check in other functions to ensure they safely fail if read_data()
-        # yet to be called.
+        # Metadata string to document in outuput file
+        self.meta_str = "INCA_file: '%s' | " % self.INCA_filename
 
     def process_data(self):
         self.read_data()
         self.sync_data()
         self.abridge_data()
         self.add_math_channels()
+
+    def find_edaq_path(self):
+        """Locate path to eDAQ file corresponding to INCA run num."""
+        eDAQ_file_num = self.run_label[0:2]
+
+        all_eDAQ_runs = os.listdir(RAW_EDAQ_ROOT)
+        found_eDAQ = False # initialize to false. Will change if file is found.
+        for eDAQ_run in all_eDAQ_runs:
+            if os.path.isdir(os.path.join(RAW_EDAQ_ROOT, eDAQ_run)):
+                continue # ignore any directories found
+            # Split the extension off the file name, then isolate the final two
+            # numbers off the date
+            run_num_i = os.path.splitext(eDAQ_run)[0].split("_")[1][0:2]
+            if run_num_i == eDAQ_file_num:
+                # break out of loop while "eDAQ_run" is set to correct filename
+                found_eDAQ = True
+                break
+        if found_eDAQ:
+            self.eDAQ_path = os.path.join(RAW_EDAQ_ROOT, eDAQ_run)
+            # Document in metadata string for later file output.
+            self.meta_str += "eDAQ file: '%s' | " % eDAQ_run
+        else:
+            raise FilenameError("No eDAQ file found for run %s" % eDAQ_file_num)
 
     def read_data(self):
         """Read in both INCA and eDAQ data from raw_data directory"""
@@ -193,7 +214,9 @@ class SingleRun(object):
                 raw_edaq_dict[channel] = []
 
             for j, eDAQ_row in enumerate(eDAQ_file_in):
-                if j == 0:
+                if j < EDAQ_HEADER_HT-1:
+                    pass
+                elif j == EDAQ_HEADER_HT-1:
                     # The first row is a list of channel names.
                     # Loop through and find the first channel for this run.
 
@@ -212,7 +235,7 @@ class SingleRun(object):
                         raise DataReadError("Can't find %s in any eDAQ file" %
                                                                 edaq_sub_run)
 
-                elif j > 0 and eDAQ_row[edaq_run_start_col+1]:
+                elif eDAQ_row[edaq_run_start_col+1]:
                     # Need to make sure we haven't reached end of channel strm.
                     # Time vector may keep going past a channel's data, so look
                     # at a run-specific channel to see if the run's ended.
@@ -226,9 +249,6 @@ class SingleRun(object):
                                     float(eDAQ_row[edaq_run_start_col+1]))
                     raw_edaq_dict["pedal_sw"].append(
                                     float(eDAQ_row[edaq_run_start_col+2]))
-
-        # Discard pedal voltage because it's not needed.
-        del raw_edaq_dict["pedal_v"]
 
         # Separate out time
         edaq_time_series = raw_edaq_dict["time"].copy()
@@ -297,9 +317,11 @@ class SingleRun(object):
         # Unify datasets into one DataFrame
         # Slice out values before t=0 (1s before first pedal press)
         # Automatically truncates longer data set
+        # The only channel in eDAQ that's valuable, and unique is gnd_speed.
         self.sync_df = pd.merge(self.inca_df.loc[0:],
                                 self.edaq_df["gnd_speed"].loc[0:],
                                 left_index=True, right_index=True)
+
         # print(len(self.inca_df))
         # print(len(self.inca_df.loc[0:]))
         # print(len(self.edaq_df))
@@ -318,6 +340,10 @@ class SingleRun(object):
 
         shifted_time_series = df.index + offset_val
         df.set_index(shifted_time_series, inplace=True)
+
+    def abridge_data(self):
+        # Implemented in child classes
+        pass
 
     def add_math_channels(self):
         self.add_cvt_ratio()
@@ -408,6 +434,9 @@ class SingleRun(object):
         sync_array.insert(0, header_rows[1])
         sync_array.insert(0, header_rows[0])
 
+        # Add metadata string (removing final unneded separator)
+        sync_array.insert(0, [self.meta_str[:-3]])
+
         # Create new CSV file and write out. Closes automatically at end of
         # with/as block.
         sync_basename = "%s_Sync.csv" % self.run_label
@@ -429,27 +458,6 @@ class SingleRun(object):
             print("\nWriting combined data to %s..." % sync_filename)
             sync_file_csv.writerows(sync_array)
             print("...done")
-
-    def find_edaq_path(self):
-        """Locate path to eDAQ file corresponding to INCA run num."""
-        eDAQ_file_num = self.run_label[0:2]
-
-        all_eDAQ_runs = os.listdir(RAW_EDAQ_ROOT)
-        found_eDAQ = False # initialize to false. Will change if file is found.
-        for eDAQ_run in all_eDAQ_runs:
-            if os.path.isdir(os.path.join(RAW_EDAQ_ROOT, eDAQ_run)):
-                continue # ignore any directories found
-            # Split the extension off the file name, then isolate the final two
-            # numbers off the date
-            run_num_i = os.path.splitext(eDAQ_run)[0].split("_")[1][0:2]
-            if run_num_i == eDAQ_file_num:
-                # break out of loop while "eDAQ_run" is set to correct filename
-                found_eDAQ = True
-                break
-        if found_eDAQ:
-            self.eDAQ_path = os.path.join(RAW_EDAQ_ROOT, eDAQ_run)
-        else:
-            raise FilenameError("No eDAQ file found for run %s" % eDAQ_file_num)
 
     def get_run_label(self):
         return self.run_label
