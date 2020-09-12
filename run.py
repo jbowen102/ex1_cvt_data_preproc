@@ -89,7 +89,7 @@ class RunGroup(object):
             if "decel" in file.lower():
                 # ThisRun = self.create_downhill_run(file)
                 input("Skipping file %s because program can't process decel "
-                "runs yet.\nPress Enter to acknowledge. > " % file)
+                "runs yet.\nPress Enter to acknowledge." % file)
                 continue
             else:
                 ThisRun = self.create_ss_run(file)
@@ -98,11 +98,9 @@ class RunGroup(object):
 
     def create_ss_run(self, filename):
         return SSRun(os.path.join(RAW_INCA_ROOT, filename))
-        # should this return the run string instead? Does it need to return?
 
     def create_downhill_run(self, filename):
         return DownhillRun(os.path.join(RAW_INCA_ROOT, filename))
-        # should this return the run string instead? Does it need to return?
 
     def plot_runs(self, overwrite=False):
         # If only one run in group is to be processed, this will only loop once.
@@ -169,8 +167,9 @@ class SingleRun(object):
                     for n, channel in enumerate(INCA_CHANNELS):
                         raw_inca_dict[channel].append(float(INCA_row[n]))
 
-        # Separate out time
+        # Separate out time. Round to nearest hundredth.
         inca_time_series = raw_inca_dict["time"].copy()
+        # print(inca_time_series[:20])
         del raw_inca_dict["time"]
 
         self.raw_inca_df = pd.DataFrame(data=raw_inca_dict,
@@ -213,7 +212,7 @@ class SingleRun(object):
                     # at a run-specific channel to see if the run's ended.
 
                     # Only add this run's channels to our data list.
-                    # Time is alwaysin first column.
+                    # Time is always in 1st column. Round to nearest hundredth.
                     raw_edaq_dict["time"].append(float(eDAQ_row[0]))
                     raw_edaq_dict["pedal_v"].append(
                                     float(eDAQ_row[edaq_run_start_col]))
@@ -227,6 +226,7 @@ class SingleRun(object):
 
         # Separate out time
         edaq_time_series = raw_edaq_dict["time"].copy()
+        # print(edaq_time_series[:20])
         del raw_edaq_dict["time"]
 
         # print(edaq_time_series[:10])
@@ -238,13 +238,17 @@ class SingleRun(object):
         print("...done")
 
     def sync_data(self):
-
         self.inca_df = self.raw_inca_df.copy(deep=True)
         self.edaq_df = self.raw_edaq_df.copy(deep=True)
         # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.copy.html
 
         # Offset time series to start at zero.
         self.zero_start_time()
+        # Convert index from seconds to hundredths of a second
+        self.inca_df.set_index(pd.Index([int(round(ti * SAMPLING_FREQ))
+                                for ti in self.inca_df.index]), inplace=True)
+        self.edaq_df.set_index(pd.Index([int(round(ti * SAMPLING_FREQ))
+                                for ti in self.edaq_df.index]), inplace=True)
 
         # Check if any pedal events exist
         if self.inca_df.loc[self.inca_df["pedal_sw"] == 1].empty:
@@ -266,7 +270,8 @@ class SingleRun(object):
 
         # Test first to see if either data set has first pedal event earlier
         # than 1s. If so, that's the new time for both files to line up at.
-        start_buffer = min([1.0, inca_high_start_t, edaq_high_start_t])
+        start_buffer = min([1 * SAMPLING_FREQ, inca_high_start_t,
+                                                            edaq_high_start_t])
         # print("start buffer: %f" % start_buffer)
 
         # truncate beginning of file, leaving short buffer before pedal down.
@@ -274,9 +279,10 @@ class SingleRun(object):
         edaq_target_t = edaq_high_start_t - start_buffer
         # find closest time value to target time
         inca_cutoff = self.inca_df.index.get_loc(inca_target_t,
-                                method="nearest", tolerance=1/SAMPLING_FREQ)
+                                                method="nearest", tolerance=1)
         edaq_cutoff = self.edaq_df.index.get_loc(edaq_target_t,
-                                method="nearest", tolerance=1/SAMPLING_FREQ)
+                                                method="nearest", tolerance=1)
+        # tolerance is really (1/SAMPLING_FREQ)*SAMPLING_FREQ = 1
 
         # remove all time values before the cutoff time
         self.inca_df = self.inca_df[self.inca_df.index[inca_cutoff]:]
@@ -286,22 +292,49 @@ class SingleRun(object):
         # Offset the time series to again start at 0.
         self.zero_start_time()
 
+        # Unify datasets into one DataFrame
+        # Truncate longer file
+        len_diff = len(self.inca_df) - len(self.edaq_df)
+        if len_diff > 0: # inca_df longer than edaq_df
+            self.inca_df = self.inca_df[:self.inca_df.index[-abs(len_diff) - 1]]
+            # Need th extra one because DataFrame slicing not same as list.
+        elif len_diff < 0:
+            self.edaq_df = self.edaq_df[:self.edaq_df.index[-abs(len_diff) - 1]]
+        else: # same length
+            pass
+
+        # can trimming of data be done automatically during a merge?
+        # can pandas match up first pedal event automatically?
+
+        # combine dataframes
+        # newdf = pd.merge(mydf1, mydf2["gnd_speed"], left_index=True, right_index=True)
+            # want to get merge to work
+        # mydf3.loc[:, "gnd_speed"] = mydf2["gnd_speed"]
+            # some values left out where indices barely mismatch
+        # mydf3.loc[:, "gnd_speed"] = mydf2["gnd_speed"].tolist()
+            # works
+
     def zero_start_time(self):
         """If first time value in either file is nonzero, offset all to
         zero."""
         inca_time_offset = self.inca_df.index[0]
         if inca_time_offset:
-            self.inca_df.set_index(self.inca_df.index - inca_time_offset,
-                                                                inplace=True)
+            shifted_time_series = self.inca_df.index - inca_time_offset
+            self.inca_df.set_index(shifted_time_series, inplace=True)
+            # self.inca_df.set_index(
+            # [round(ti, 2) for ti in shifted_time_series.tolist()], inplace=True)
 
         edaq_time_offset = self.edaq_df.index[0]
         if edaq_time_offset:
-            self.edaq_df.set_index(self.edaq_df.index - edaq_time_offset,
-                                                                inplace=True)
+            shifted_time_series = self.edaq_df.index - edaq_time_offset
+            self.edaq_df.set_index(shifted_time_series, inplace=True)
 
     def plot_data(self, overwrite=False):
         print("Plotting data")
 
+        # Convert DF indices from hundredths of a second to seconds
+        inca_times = [round(ti/SAMPLING_FREQ, 2)
+                                            for ti in self.inca_df.index]
         # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
         ax1 = plt.subplot(211)
         plt.plot(self.raw_inca_df.index, self.raw_inca_df["throttle"],
@@ -312,7 +345,7 @@ class SingleRun(object):
         plt.setp(ax1.get_xticklabels(), visible=False)
 
         ax2 = plt.subplot(212, sharex=ax1, sharey=ax1)
-        plt.plot(self.inca_df.index, self.inca_df["throttle"],
+        plt.plot(inca_times, self.inca_df["throttle"],
                                                     label="Throttle (synced)")
         # https://matplotlib.org/3.2.1/gallery/subplots_axes_and_figures/shared_axis_demo.html#sphx-glr-gallery-subplots-axes-and-figures-shared-axis-demo-py
 
@@ -342,10 +375,13 @@ class SingleRun(object):
 
     def export_data(self, overwrite=False):
 
-        # Create list of lists to use for writing out
-        inca_indices = self.inca_df.index.tolist()
+        # Create to list of lists for easier writing out
+        # Convert time values from hundredths of a second to seconds
+        inca_indices = [round(ti/SAMPLING_FREQ,2)
+                                    for ti in self.inca_df.index.tolist()]
+        edaq_indices = [round(ti/SAMPLING_FREQ,2)
+                                    for ti in self.edaq_df.index.tolist()]
         inca_data_array = self.inca_df.values.tolist()
-        edaq_indices = self.edaq_df.index.tolist()
         edaq_data_array = self.edaq_df.values.tolist()
         # https://stackoverflow.com/questions/28006793/pandas-dataframe-to-list-of-lists
 
@@ -375,8 +411,10 @@ class SingleRun(object):
                     sync_array.append([""]*len(INCA_CHANNELS) + edaq_line)
 
         # Format header rows
-        inca_header = [INCA_CHANNELS[:], [CHANNEL_UNITS[c] for c in INCA_CHANNELS]]
-        edaq_header = [EDAQ_CHANNELS[:], [CHANNEL_UNITS[c] for c in EDAQ_CHANNELS]]
+        inca_header = [INCA_CHANNELS[:],
+                                    [CHANNEL_UNITS[c] for c in INCA_CHANNELS]]
+        edaq_header = [EDAQ_CHANNELS[:],
+                                    [CHANNEL_UNITS[c] for c in EDAQ_CHANNELS]]
         # Remove pedal voltage
         edaq_header[0].remove("pedal_v")
         edaq_header[1].remove("V")
@@ -476,12 +514,15 @@ class SSRun(SingleRun):
         pedal_down = False
         counting = False
         keep = False
+
         for i, ti in enumerate(self.inca_df.index):
             # Main loop evaluates pedal-down event. Stores event start and end
             # times if inner loop finds throttle was >45deg for >2s during event
+
             if self.inca_df["pedal_sw"][ti]:
                 if not pedal_down:
-                    print("\tPedal actuated at time\t\t%0.4fs" % ti)
+                    print("\tPedal actuated at time\t\t%0.2fs" %
+                                                        (ti / SAMPLING_FREQ))
                 # pedal currently down
                 pedal_down = True
                 ped_buffer.append(ti) # add current time to pedal buffer.
@@ -490,23 +531,24 @@ class SSRun(SingleRun):
                 if not counting and (self.inca_df["throttle"][ti] >
                                                             self.THRTL_THRESH):
                     # first time throttle exceeds 45 deg
-                    print("\t\tThrottle >%d deg at time\t%0.4fs" %
-                                                    (self.THRTL_THRESH, ti))
+                    print("\t\tThrottle >%d deg at time\t%0.2fs" %
+                                        (self.THRTL_THRESH, ti / SAMPLING_FREQ))
                     high_throttle_time[0] = ti
                     counting = True
 
                 elif counting and (self.inca_df["throttle"][ti] <
                                                             self.THRTL_THRESH):
                     # throttle drops below 45 deg
-                    print("\t\tThrottle <%d deg at time\t%0.4fs" %
-                                                        (self.THRTL_THRESH, ti))
+                    print("\t\tThrottle <%d deg at time\t%0.2fs" %
+                                        (self.THRTL_THRESH, ti / SAMPLING_FREQ))
                     high_throttle_time[1] = self.inca_df.index[i-1] # prev. time
                     delta = high_throttle_time[1] - high_throttle_time[0]
-                    print("\t\tThrottle >%d deg total t:\t%0.4fs" %
-                                                    (self.THRTL_THRESH, delta))
+                    print("\t\tThrottle >%d deg total t:\t%0.2fs" %
+                                    (self.THRTL_THRESH, delta / SAMPLING_FREQ))
                     # calculate if that >45deg event lasted longer than 2s.
                     if (high_throttle_time[1] - high_throttle_time[0] >
-                                                        self.THRTL_T_THRESH):
+                                          self.THRTL_T_THRESH * SAMPLING_FREQ):
+                        # Multiplying by sampling f to get hundredths of a sec.
                         keep = True
                         # now the times stored in ped_buffer constitute a valid
                         # event. As long as the pedal switch stays actuated,
@@ -516,7 +558,7 @@ class SSRun(SingleRun):
 
             elif pedal_down:
                 # pedal just lifted
-                print("\tPedal lifted at time\t\t%0.4fs\n" % ti)
+                print("\tPedal lifted at time\t\t%0.2fs\n" % (ti/SAMPLING_FREQ))
                 if keep:
                     valid_event_times.append( [ped_buffer[0], ped_buffer[-1]] )
                 pedal_down = False
@@ -528,7 +570,8 @@ class SSRun(SingleRun):
 
         print("\nValid steady-state ranges:")
         for event_time in valid_event_times:
-            print("\t%0.3f\t->\t%0.3f" % (event_time[0], event_time[1]))
+            print("\t%0.2f\t->\t%0.2f"
+               % (event_time[0] / SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
 
         if not valid_event_times:
             # If no times were stored, then something might be wrong.
@@ -541,36 +584,41 @@ class SSRun(SingleRun):
         valid_event_times_c = valid_event_times.copy()
         for n, pair in enumerate(valid_event_times[1:]):
             # print("\t%f - %f" % (pair[0], previous_pair[1]))
-            if pair[0] - previous_pair[1] < 5:
+            if pair[0] - previous_pair[1] < (5 * SAMPLING_FREQ):
                 # Replace the two pairs with a single combined pair
                 del valid_event_times_c[n-1]
                 valid_event_times_c[n] = [ previous_pair[0], pair[1] ]
             previous_pair = pair
         print("\nAfter any merges:")
         for event_time in valid_event_times_c:
-            print("\t%0.3f\t->\t%0.3f" % (event_time[0], event_time[1]))
+            print("\t%0.2f\t->\t%0.2f"
+                % (event_time[0]/SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
 
         # print("\nLooking for real times to use after adding buffers:")
         # add one-second buffer to each side of valid pedal-down events.
         for n, pair in enumerate(valid_event_times_c):
-            if n == 0 and pair[0] <= 1.0:
+            if n == 0 and pair[0] <= (1 * SAMPLING_FREQ):
                 # Set zero as start value if first time is less than 1s.
                 new_start_i = 0
             else:
-                new_start_i = self.inca_df.index.get_loc(pair[0] - 1.0,
-                                method="nearest", tolerance=1/SAMPLING_FREQ)
+                new_start_i = self.inca_df.index.get_loc(
+                                                pair[0] - 1*SAMPLING_FREQ,
+                                                method="nearest", tolerance=1)
+            # tolerance is really (1/SAMPLING_FREQ)*SAMPLING_FREQ = 1
 
             # print("New start: %f" % INCA_data["time"][new_start_i])
             pair[0] = self.inca_df.index[new_start_i]
 
-            new_end_i = self.inca_df.index.get_loc(pair[1] + 1.0,
-                                    method="nearest", tolerance=1/SAMPLING_FREQ)
+            new_end_i = self.inca_df.index.get_loc(pair[1] + 1*SAMPLING_FREQ,
+                                            method="nearest", tolerance=1)
+            # tolerance is really (1/SAMPLING_FREQ)*SAMPLING_FREQ = 1
             # print("New end: %f" % INCA_data["time"][new_end_i])
             pair[1] = self.inca_df.index[new_end_i]
 
         print("\nINCA times with 1-second buffers added:")
         for event_time in valid_event_times_c:
-            print("\t%0.3f\t->\t%0.3f" % (event_time[0], event_time[1]))
+            print("\t%0.2f\t->\t%0.2f"
+               % (event_time[0] / SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
         print("\n")
 
         # Split DataFrame into valid pieces; store in lists
@@ -583,25 +631,23 @@ class SSRun(SingleRun):
             INCA_start_i = self.inca_df.index.get_loc(time_range[0])
             INCA_end_i = self.inca_df.index.get_loc(time_range[1])
             edaq_match_start_i = self.edaq_df.index.get_loc(time_range[0],
-                                method="nearest", tolerance=1/SAMPLING_FREQ)
+                                method="nearest", tolerance=1)
             edaq_match_end_i = self.edaq_df.index.get_loc(time_range[1],
-                                method="nearest", tolerance=1/SAMPLING_FREQ)
+                                method="nearest", tolerance=1)
+            # tolerances are really (1/SAMPLING_FREQ)*SAMPLING_FREQ = 1
 
             # create separate DataFrames for just this event
             valid_inca_event = self.inca_df[self.inca_df.index[INCA_start_i]
-                                            :self.inca_df.index[INCA_end_i - 1]]
+                                             :self.inca_df.index[INCA_end_i]]
             valid_edaq_event = self.edaq_df[
                                        self.edaq_df.index[edaq_match_start_i]
-                                       :self.edaq_df.index[edaq_match_end_i-1] ]
-            # Quirk w/ DataFrames where slicing doesn't work same as w/ lists.
-            # df[df.index[4]:df.index[6]] will return a df w/ rows 4, 5, AND 6.
-            # mylist[4:6] will return items from pos. 4 and 5 only
+                                       :self.edaq_df.index[edaq_match_end_i]]
 
             # shift time values to maintain continuity.
             INCA_shift = time_range[0] - desired_start_t_inca
             eDAQ_shift = (self.edaq_df.index[edaq_match_start_i] -
                                                         desired_start_t_edaq)
-            print("Shift (event %d): %f" % (n, INCA_shift))
+            print("Shift (event %d): %f" % (n, INCA_shift / SAMPLING_FREQ))
             # print("\nShift (eDAQ): %f" % (eDAQ_shift))
             valid_inca_event.set_index(valid_inca_event.index - INCA_shift,
                                                                  inplace=True)
@@ -615,12 +661,12 @@ class SSRun(SingleRun):
             # define next start time to be next time value after new vector's
             # end time.
             desired_start_t_inca = self.inca_df.index[
-                        self.inca_df.index.get_loc(time_range[1] - INCA_shift,
-                                method="nearest", tolerance=1/SAMPLING_FREQ)]
-
+                          self.inca_df.index.get_loc(time_range[1] - INCA_shift,
+                                                method="nearest", tolerance=1)]
             desired_start_t_edaq = self.edaq_df.index[
-                        self.edaq_df.index.get_loc(desired_start_t_inca,
-                                method="nearest", tolerance=1/SAMPLING_FREQ)]
+                          self.edaq_df.index.get_loc(desired_start_t_inca,
+                                                method="nearest", tolerance=1)]
+            # tolerances are really (1/SAMPLING_FREQ)*SAMPLING_FREQ = 1
             # print("desired start times (INCA/eDAQ): %f, %f" %
             # (desired_start_t_inca, desired_start_t_edaq))
 
@@ -630,9 +676,11 @@ class SSRun(SingleRun):
         self.edaq_df = pd.concat(valid_edaq_events)
 
         print("\nINCA file time span: %f -> %f (%d data points)" %
-       (self.inca_df.index[0], self.inca_df.index[-1], len(self.inca_df.index)))
+               (self.inca_df.index[0]/SAMPLING_FREQ,
+                self.inca_df.index[-1]/SAMPLING_FREQ, len(self.inca_df.index)))
         print("eDAQ file time span: %f -> %f (%d data points)" %
-       (self.edaq_df.index[0], self.edaq_df.index[-1], len(self.edaq_df.index)))
+               (self.edaq_df.index[0]/SAMPLING_FREQ,
+                self.edaq_df.index[-1]/SAMPLING_FREQ, len(self.edaq_df.index)))
 
 
     def get_run_type(self):
@@ -697,18 +745,12 @@ def add_cvt_ratio(sync_array):
     gnd_spd_col = 6
     # Confirm assumptions of which columns contain engine speed and vehicle
     # speed.
-    if not ("engine_spd" in sync_array[0][engine_spd_col] or "NE" in
-                                                sync_array[0][engine_spd_col]):
-    # if ("NE" not in sync_array[0][engine_spd_col] or "engine_spd" not in
-    #                                             sync_array[0][engine_spd_col]):
+    if not "engine_spd" in sync_array[0][engine_spd_col]:
         raise DataReadError("Bad engine speed column number assumption. "
-        "Expected to see 'NE' or 'engine_spd' in column %d" % engine_spd_col)
-    if not ("gnd_speed" in sync_array[0][gnd_spd_col] or "Ground_Speed" in sync_array[0][gnd_spd_col]):
-    # if ("Ground_Speed" not in sync_array[0][gnd_spd_col] or "gnd_speed" not in
-    #                                             sync_array[0][gnd_spd_col]):
+        "Expected to see 'engine_spd' in column %d" % engine_spd_col)
+    if not ("gnd_speed" in sync_array[0][gnd_spd_col]):
         raise DataReadError("Bad engine speed column number assumption. "
-        "Expected to see 'Ground_Speed' or 'gnd_speed' in column %d"
-                                                                % gnd_spd_col)
+            "Expected to see 'gnd_speed' in column %d" % gnd_spd_col)
 
     sync_array_w_cvt = sync_array.copy()
 
