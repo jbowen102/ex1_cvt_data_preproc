@@ -243,12 +243,9 @@ class SingleRun(object):
                     # Only add this run's channels to our data list.
                     # Time is always in 1st column. Round to nearest hundredth.
                     raw_edaq_dict["time"].append(float(eDAQ_row[0]))
-                    raw_edaq_dict["pedal_v"].append(
-                                    float(eDAQ_row[edaq_run_start_col]))
-                    raw_edaq_dict["gnd_speed"].append(
-                                    float(eDAQ_row[edaq_run_start_col+1]))
-                    raw_edaq_dict["pedal_sw"].append(
-                                    float(eDAQ_row[edaq_run_start_col+2]))
+                    for n, channel in enumerate(EDAQ_CHANNELS[1:]):
+                        raw_edaq_dict[channel].append(
+                                        float(eDAQ_row[edaq_run_start_col+n]))
 
         # Separate out time
         edaq_time_series = raw_edaq_dict["time"].copy()
@@ -364,7 +361,7 @@ class SingleRun(object):
         cvt_ratio = self.sync_df["engine_spd"] / input_shaft_ang_spd
 
         # Remove any values that are zero or > 5 (including infinite).
-        cvt_ratio[cvt_ratio > 5] = 0
+        cvt_ratio[cvt_ratio > 5] = 0  # Setting to 0 prevents error in next line
         cvt_ratio[cvt_ratio == 0] = ""
 
         self.sync_df["CVT_ratio_calc"] = cvt_ratio
