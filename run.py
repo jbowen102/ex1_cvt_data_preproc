@@ -355,13 +355,12 @@ class SingleRun(object):
     def add_cvt_ratio(self):
         ROLLING_RADIUS_FACTOR = 0.965
         TIRE_DIAM_IN = 18 # inches
-        tire_circ = math.pi * TIRE_DIAM_IN * ROLLING_RADIUS_FACTOR
+        tire_circ = math.pi * TIRE_DIAM_IN * ROLLING_RADIUS_FACTOR # inches
 
         AXLE_RATIO = 11.47
         GEARBOX_RATIO = 1.95
 
-        gnd_spd_in_min = self.sync_df["gnd_speed"] * 5280 * 12/60
-        # ground speed in inches/min
+        gnd_spd_in_min = self.sync_df["gnd_speed"] * 5280 * 12/60 # inches/min
 
         tire_ang_spd = gnd_spd_in_min / tire_circ
         self.math_df["input_shaft_ang_spd"] = tire_ang_spd * AXLE_RATIO * GEARBOX_RATIO
@@ -369,19 +368,11 @@ class SingleRun(object):
                                         / self.math_df["input_shaft_ang_spd"])
 
         # # Remove any values that are zero or > 5 (including infinite).
-        # cvt_ratio[cvt_ratio > 5] = 0  # Setting to 0 prevents error in next line
-        # cvt_ratio[cvt_ratio == 0] = ""
-        # cvt_ratio[cvt_ratio > 5] = np.NaN
-        # cvt_ratio[cvt_ratio == 0] = np.NaN
-        # cvt_ratio.where(cvt_ratio > 5, np.NaN)
-        # cvt_ratio.where(cvt_ratio == 0, np.NaN)
-        self.math_df["cvt_ratio"].mask(
-                self.math_df["cvt_ratio"] > 5, inplace=True)   # replaces w/ NaN
-        self.math_df["cvt_ratio"].mask(
-                self.math_df["cvt_ratio"] == 0, inplace=True)  # replaces w/ NaN
+        self.math_df["cvt_ratio"].mask((self.math_df["cvt_ratio"] > 5)
+            | (self.math_df["cvt_ratio"] == 0), inplace=True)  # replaces w/ NaN
 
         # Transcribe to main DF for export
-        self.sync_df["CVT_ratio_calc"] = self.math_df["cvt_ratio"]
+        self.sync_df["CVT_ratio_calc"] = self.math_df["cvt_ratio"].copy()
         CHANNEL_UNITS["CVT_ratio_calc"] = "rpm/rpm"
 
     def plot_data(self, overwrite=False):
@@ -453,7 +444,7 @@ class SingleRun(object):
         sync_array.insert(0, header_rows[0])
 
         # Add metadata string (removing final unneded separator)
-        sync_array.insert(0, [self.meta_str[:-3]])
+        sync_array.insert(0, [self.get_meta_str()])
 
         # Create new CSV file and write out. Closes automatically at end of
         # with/as block.
@@ -479,6 +470,9 @@ class SingleRun(object):
 
     def get_run_label(self):
         return self.run_label
+
+    def get_meta_str(self):
+        return self.meta_str[:-3]
 
     def __str__(self):
         return self.run_label
@@ -660,49 +654,105 @@ class SSRun(SingleRun):
         self.add_avg_speed()
 
     def add_avg_speed(self):
-        WIN_SIZE_AVG = 200  # window size for speed rolling avg.
-        WIN_SIZE_SLOPE = 20 # win size for rolling slope of speed rolling avg.
-        SPD_CR = 2.5      # mph. Speed (min) criterion to determining if
+        WIN_SIZE_AVG = 201  # window size for speed rolling avg.
+        WIN_SIZE_SLOPE = 21 # win size for rolling slope of speed rolling avg.
+
+        GSPD_CR = 2.5     # mph. Ground speed (min) criterion for determining if
                           # steady-state event is moving rather than stationary.
-        SLOPE_CR = 0.125  # mph/s.
-        # Slope (max) criterion to est. steady-state. Absolute value
+        GS_SLOPE_CR = 0.125  # mph/s.
+        # Ground-speed slope (max) criterion to est. steady-state. Abs value
+
+        ESPD_CR = 2750    # rpm. Engine speed (min) criterion for determining if
+                          # steady-state event is moving rather than stationary.
+        ES_SLOPE_CR = 100  # rpm/s.
+        # Engine-speed slope (max) criterion to est. steady-state. Abs value
 
         # Document in metadata string for output file:
-        self.meta_str += ("Steady-state calc rolling avg window size: '%s' | "
-                                                                % WIN_SIZE_AVG)
-        self.meta_str += ("Steady-state calc rolling slope window size: '%s' | "
-                                                            % WIN_SIZE_SLOPE)
-        self.meta_str += ("Steady-state calc min speed criterion: '%s' | "
-                                                                % SPD_CR)
-        self.meta_str += ("Steady-state criterion: slope less than '%s' | "
-                                                                % SLOPE_CR)
+        self.meta_str += ("Steady-state calc criteria: "
+                          "gnd speed above %s mph, "
+                          "gnd speed slope magnitude less than %s mph/s, "
+                          "eng speed above %s rpm, "
+                          "eng speed slope magnitude less than %s rpm/s | "
+                            % (GSPD_CR, GS_SLOPE_CR, ESPD_CR, ES_SLOPE_CR))
+        self.meta_str += ("Steady-state calc rolling window sizes: "
+                                                "%d for avg, %d for slope | "
+                                            % (WIN_SIZE_AVG, WIN_SIZE_SLOPE))
 
-        self.math_df["rolling_avg"] = self.sync_df.rolling(window=WIN_SIZE_AVG,
-                                                center=True)["gnd_speed"].mean()
-        # print(len(rolling_avgs))
+        # Create rolling average and rolling (regression) slope of rolling avg
+        # for ground speed.
+        self.math_df["gs_rolling_avg"] = self.sync_df.rolling(
+                           window=WIN_SIZE_AVG, center=True)["gnd_speed"].mean()
         # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.rolling.html
 
-        # print(len(valid_rolling_avgs))
-        # https://stackoverflow.com/questions/18665873/filtering-a-list-based-on-a-list-of-booleans
-
-
-        # slopes = np.polyval(np.polyfit(mydf3.index[100:-100], mydf3["gnd_speed_avg"][100:-100], 1), mydf3.index)
-        # ^^ This worked in terminal, at least to create an array, not necessarily right values
-        # rolling_slopes = np.polyval(np.polyfit(valid_rolling_avgs.index,
-        #                     valid_rolling_avgs, 1), valid_rolling_avgs.index)
-        # ^^ not working right. Creates values but incorrect. Slightly different values from terminal one, but window probably slightly off.
-        # rolling_slopes = valid_rolling_avgs.apply(
-        #             lambda x: np.polyfit(valid_rolling_avgs.index, x, 1)[0])
-
-        self.math_df["rolling_slope"] = self.math_df["rolling_avg"].rolling(
+        print("\nCalculating rolling regression on ground speed data...")
+        self.math_df["gs_rolling_slope"] = self.math_df["gs_rolling_avg"].rolling(
                     window=WIN_SIZE_SLOPE, center=True).apply(
                         lambda x: np.polyfit(x.index/SAMPLING_FREQ, x, 1)[0])
-        print(self.math_df["rolling_slope"][150])
-        # Need to specify raw=False in apply() ?
+        print("...done")
+
+        # Create rolling average and rolling (regression) slope of rolling avg
+        # for engine speed.
+        self.math_df["es_rolling_avg"] = self.sync_df.rolling(
+                          window=WIN_SIZE_AVG, center=True)["engine_spd"].mean()
+
+        print("Calculating rolling regression on engine speed data...")
+        self.math_df["es_rolling_slope"] = self.math_df["es_rolling_avg"].rolling(
+                    window=WIN_SIZE_SLOPE, center=True).apply(
+                        lambda x: np.polyfit(x.index/SAMPLING_FREQ, x, 1)[0])
+        print("...done")
+        # No need to run rolling avg or slope on cvt_ratio since we aren't
+        # applying criteria to it for purpose of determining steady state.
+        self.math_df["filtered_cvt"] = self.math_df["cvt_ratio"].copy(deep=True)
+
+        # Apply speed and speed slope criteria to isolate steady-state events.
+        # Use compound OR statement to generate a mask.
+        criteria_mask = (  (self.math_df["gs_rolling_avg"] < GSPD_CR)
+                         | (self.math_df["gs_rolling_slope"] > GS_SLOPE_CR)
+                         | (self.math_df["gs_rolling_slope"] < -GS_SLOPE_CR)
+                         | (self.math_df["es_rolling_avg"] < ESPD_CR)
+                         | (self.math_df["es_rolling_slope"] > ES_SLOPE_CR)
+                         | (self.math_df["es_rolling_slope"] < -ES_SLOPE_CR) )
+        # GS_SLOPE_CR and ES_SLOPE_CR are abs value so have to apply on high
+        # and low end.
+
+        # "Mask off" by assigning NaN where criteria not met.
+        self.math_df["gs_rolling_avg"].mask(criteria_mask, inplace=True)
+        self.math_df["es_rolling_avg"].mask(criteria_mask, inplace=True)
+        self.math_df["filtered_cvt"].mask(criteria_mask, inplace=True)
+        # Masking these too to calculate avg slope off SS region later:
+        self.math_df["gs_rolling_slope"].mask(criteria_mask, inplace=True)
+        self.math_df["es_rolling_slope"].mask(criteria_mask, inplace=True)
+
+        # Calculate overall (aggregate) mean of each filtereed/masked channel
+        # Prefill with NaN and assign mean to first element
+        self.math_df["SS_gnd_spd_avg"] = np.nan
+        self.math_df["SS_gnd_spd_avg"][0] = np.mean(
+                                                 self.math_df["gs_rolling_avg"])
+        self.math_df["SS_gnd_spd_slope_avg"] = np.nan
+        self.math_df["SS_gnd_spd_slope_avg"][0] = np.mean(
+                                               self.math_df["gs_rolling_slope"])
+        self.math_df["SS_eng_spd_avg"] = np.nan
+        self.math_df["SS_eng_spd_avg"][0] = np.mean(
+                                                 self.math_df["es_rolling_avg"])
+        self.math_df["SS_eng_spd_slope_avg"] = np.nan
+        self.math_df["SS_eng_spd_slope_avg"][0] = np.mean(
+                                               self.math_df["es_rolling_slope"])
+        self.math_df["SS_cvt_ratio_avg"] = np.nan
+        self.math_df["SS_cvt_ratio_avg"][0] = np.mean(
+                                                   self.math_df["filtered_cvt"])
+
+        # Transcribe to main DF for export
+        # Leave out average SS slopes.
+        self.sync_df["SS_gnd_spd_avg_calc"] = self.math_df["SS_gnd_spd_avg"]
+        self.sync_df["SS_eng_spd_avg_calc"] = self.math_df["SS_eng_spd_avg"]
+        self.sync_df["SS_cvt_ratio_avg_calc"] = self.math_df["SS_cvt_ratio_avg"]
+        CHANNEL_UNITS["SS_gnd_spd_avg_calc"] = CHANNEL_UNITS["gnd_speed"]
+        CHANNEL_UNITS["SS_eng_spd_avg_calc"] = CHANNEL_UNITS["engine_spd"]
+        CHANNEL_UNITS["SS_cvt_ratio_avg_calc"] = CHANNEL_UNITS["CVT_ratio_calc"]
+
+        # pandas rolling(), apply(), regression references:
         # https://stackoverflow.com/questions/47390467/pandas-dataframe-rolling-with-two-columns-and-two-rows
         # https://pandas.pydata.org/pandas-docs/version/0.23.4/whatsnew.html#rolling-expanding-apply-accepts-raw-false-to-pass-a-series-to-the-function
-
-        # Other pandas rolling(), apply(), regression references:
         # https://stackoverflow.com/questions/49100471/how-to-get-slopes-of-data-in-pandas-dataframe-in-python
         # https://www.pythonprogramming.net/rolling-apply-mapping-functions-data-analysis-python-pandas-tutorial/
         # https://stackoverflow.com/questions/21025821/python-custom-function-using-rolling-apply-for-pandas
@@ -714,19 +764,6 @@ class SSRun(SingleRun):
         # https://medium.com/the-code-monster/split-a-dataset-into-train-and-test-datasets-using-sk-learn-acc7fd1802e0
         # https://towardsdatascience.com/regression-plots-with-pandas-and-numpy-faf2edbfad4f
         # https://data36.com/linear-regression-in-python-numpy-polyfit/
-
-
-        # Apply slope criterion to isolate steady-state events.
-        # "Mask off" by assigning NaN where criteria not met.
-        self.math_df["rolling_avg"].mask(
-                             self.math_df["rolling_avg"] < SPD_CR, inplace=True)
-        self.math_df["rolling_avg"].mask(
-                         self.math_df["rolling_slope"] > SLOPE_CR, inplace=True)
-        self.math_df["rolling_avg"].mask(
-                        self.math_df["rolling_slope"] < -SLOPE_CR, inplace=True)
-        # SLOPE_CR is abs value so have to apply it on high and low end.
-        print(np.mean(self.math_df["rolling_avg"]))
-
 
     def get_run_type(self):
         return "SSRun"
@@ -742,7 +779,7 @@ class DownhillRun(SingleRun):
         return "DownhillRun"
 
 
-def main_prog2():
+def main_prog():
     # Set up command-line argument parser
     # https://docs.python.org/3/howto/argparse.html
     # If you pass in any arguments from the command line after "python run.py",
@@ -772,4 +809,4 @@ def main_prog2():
 
 
 if __name__ == "__main__":
-    main_prog2()
+    main_prog()
