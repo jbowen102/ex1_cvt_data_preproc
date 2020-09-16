@@ -3,6 +3,8 @@ import csv          # Needed to read in and write out data
 import argparse     # Used to parse optional command-line arguments
 import math         # Using pi to convert linear speed to angular speed.
 import pandas as pd # Series and DataFrame structures
+import numpy as np
+
 
 try:
     import matplotlib
@@ -338,11 +340,16 @@ class SingleRun(object):
         shifted_time_series = df.index + offset_val
         df.set_index(shifted_time_series, inplace=True)
 
+        # Maybe could use df.shift() here instead.
+        # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.shift.html
+
     def abridge_data(self):
         # Implemented in child classes
         pass
 
     def add_math_channels(self):
+        self.math_df = pd.DataFrame(index=self.sync_df.index)
+        # https://stackoverflow.com/questions/18176933/create-an-empty-data-frame-with-index-from-another-data-frame
         self.add_cvt_ratio()
 
     def add_cvt_ratio(self):
@@ -357,14 +364,24 @@ class SingleRun(object):
         # ground speed in inches/min
 
         tire_ang_spd = gnd_spd_in_min / tire_circ
-        input_shaft_ang_spd = tire_ang_spd * AXLE_RATIO * GEARBOX_RATIO
-        cvt_ratio = self.sync_df["engine_spd"] / input_shaft_ang_spd
+        self.math_df["input_shaft_ang_spd"] = tire_ang_spd * AXLE_RATIO * GEARBOX_RATIO
+        self.math_df["cvt_ratio"] = (self.sync_df["engine_spd"]
+                                        / self.math_df["input_shaft_ang_spd"])
 
-        # Remove any values that are zero or > 5 (including infinite).
-        cvt_ratio[cvt_ratio > 5] = 0  # Setting to 0 prevents error in next line
-        cvt_ratio[cvt_ratio == 0] = ""
+        # # Remove any values that are zero or > 5 (including infinite).
+        # cvt_ratio[cvt_ratio > 5] = 0  # Setting to 0 prevents error in next line
+        # cvt_ratio[cvt_ratio == 0] = ""
+        # cvt_ratio[cvt_ratio > 5] = np.NaN
+        # cvt_ratio[cvt_ratio == 0] = np.NaN
+        # cvt_ratio.where(cvt_ratio > 5, np.NaN)
+        # cvt_ratio.where(cvt_ratio == 0, np.NaN)
+        self.math_df["cvt_ratio"].mask(
+                self.math_df["cvt_ratio"] > 5, inplace=True)   # replaces w/ NaN
+        self.math_df["cvt_ratio"].mask(
+                self.math_df["cvt_ratio"] == 0, inplace=True)  # replaces w/ NaN
 
-        self.sync_df["CVT_ratio_calc"] = cvt_ratio
+        # Transcribe to main DF for export
+        self.sync_df["CVT_ratio_calc"] = self.math_df["cvt_ratio"]
         CHANNEL_UNITS["CVT_ratio_calc"] = "rpm/rpm"
 
     def plot_data(self, overwrite=False):
@@ -413,6 +430,10 @@ class SingleRun(object):
         # Convert time values from hundredths of a second to seconds
         time_series = [round(ti/SAMPLING_FREQ,2)
                                     for ti in self.sync_df.index.tolist()]
+
+        # # Replace any NaNs with blanks
+        self.sync_df.fillna("", inplace=True)
+        # https://stackoverflow.com/questions/26837998/pandas-replace-nan-with-blank-empty-string
 
         sync_array = self.sync_df.values.tolist()
         # https://stackoverflow.com/questions/28006793/pandas-dataframe-to-list-of-lists
@@ -469,9 +490,9 @@ class SingleRun(object):
 class SSRun(SingleRun):
     """Represents a single run with steady-state operation."""
     # def __init__(self, INCA_path):
-        # This invokes all the actions in the parent class's __init__() method.
-        # SingleRun.__init__(self, INCA_path)
-        # super(SSRun, self).__init__(INCA_path)
+    #     # This performs all the actions in the parent class's method.
+    #     SingleRun.__init__(self, INCA_path)
+    #     super(SSRun, self).__init__(INCA_path)
         # https://stackoverflow.com/questions/5166473/inheritance-and-init-method-in-python
         # https://stackoverflow.com/questions/222877/what-does-super-do-in-python
 
@@ -632,6 +653,80 @@ class SSRun(SingleRun):
         print("\nData time span: %.2f -> %.2f (%d data points)" %
                (self.sync_df.index[0]/SAMPLING_FREQ,
                 self.sync_df.index[-1]/SAMPLING_FREQ, len(self.sync_df.index)))
+
+    def add_math_channels(self):
+        # This performs all the actions in the parent class's method
+        super(SSRun, self).add_math_channels()
+        self.add_avg_speed()
+
+    def add_avg_speed(self):
+        WIN_SIZE_AVG = 200  # window size for speed rolling avg.
+        WIN_SIZE_SLOPE = 20 # win size for rolling slope of speed rolling avg.
+        SPD_CR = 2.5      # mph. Speed (min) criterion to determining if
+                          # steady-state event is moving rather than stationary.
+        SLOPE_CR = 0.125  # mph/s.
+        # Slope (max) criterion to est. steady-state. Absolute value
+
+        # Document in metadata string for output file:
+        self.meta_str += ("Steady-state calc rolling avg window size: '%s' | "
+                                                                % WIN_SIZE_AVG)
+        self.meta_str += ("Steady-state calc rolling slope window size: '%s' | "
+                                                            % WIN_SIZE_SLOPE)
+        self.meta_str += ("Steady-state calc min speed criterion: '%s' | "
+                                                                % SPD_CR)
+        self.meta_str += ("Steady-state criterion: slope less than '%s' | "
+                                                                % SLOPE_CR)
+
+        self.math_df["rolling_avg"] = self.sync_df.rolling(window=WIN_SIZE_AVG,
+                                                center=True)["gnd_speed"].mean()
+        # print(len(rolling_avgs))
+        # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.rolling.html
+
+        # print(len(valid_rolling_avgs))
+        # https://stackoverflow.com/questions/18665873/filtering-a-list-based-on-a-list-of-booleans
+
+
+        # slopes = np.polyval(np.polyfit(mydf3.index[100:-100], mydf3["gnd_speed_avg"][100:-100], 1), mydf3.index)
+        # ^^ This worked in terminal, at least to create an array, not necessarily right values
+        # rolling_slopes = np.polyval(np.polyfit(valid_rolling_avgs.index,
+        #                     valid_rolling_avgs, 1), valid_rolling_avgs.index)
+        # ^^ not working right. Creates values but incorrect. Slightly different values from terminal one, but window probably slightly off.
+        # rolling_slopes = valid_rolling_avgs.apply(
+        #             lambda x: np.polyfit(valid_rolling_avgs.index, x, 1)[0])
+
+        self.math_df["rolling_slope"] = self.math_df["rolling_avg"].rolling(
+                    window=WIN_SIZE_SLOPE, center=True).apply(
+                        lambda x: np.polyfit(x.index/SAMPLING_FREQ, x, 1)[0])
+        print(self.math_df["rolling_slope"][150])
+        # Need to specify raw=False in apply() ?
+        # https://stackoverflow.com/questions/47390467/pandas-dataframe-rolling-with-two-columns-and-two-rows
+        # https://pandas.pydata.org/pandas-docs/version/0.23.4/whatsnew.html#rolling-expanding-apply-accepts-raw-false-to-pass-a-series-to-the-function
+
+        # Other pandas rolling(), apply(), regression references:
+        # https://stackoverflow.com/questions/49100471/how-to-get-slopes-of-data-in-pandas-dataframe-in-python
+        # https://www.pythonprogramming.net/rolling-apply-mapping-functions-data-analysis-python-pandas-tutorial/
+        # https://stackoverflow.com/questions/21025821/python-custom-function-using-rolling-apply-for-pandas
+        # http://greg-ashton.physics.monash.edu/applying-python-functions-in-moving-windows.html
+        # https://stackoverflow.com/questions/50482884/module-pandas-has-no-attribute-rolling-mean
+        # https://stackoverflow.com/questions/45254174/how-do-pandas-rolling-objects-work
+        # https://pandas.pydata.org/pandas-docs/stable/user_guide/computation.html
+        # https://becominghuman.ai/linear-regression-in-python-with-pandas-scikit-learn-72574a2ec1a5
+        # https://medium.com/the-code-monster/split-a-dataset-into-train-and-test-datasets-using-sk-learn-acc7fd1802e0
+        # https://towardsdatascience.com/regression-plots-with-pandas-and-numpy-faf2edbfad4f
+        # https://data36.com/linear-regression-in-python-numpy-polyfit/
+
+
+        # Apply slope criterion to isolate steady-state events.
+        # "Mask off" by assigning NaN where criteria not met.
+        self.math_df["rolling_avg"].mask(
+                             self.math_df["rolling_avg"] < SPD_CR, inplace=True)
+        self.math_df["rolling_avg"].mask(
+                         self.math_df["rolling_slope"] > SLOPE_CR, inplace=True)
+        self.math_df["rolling_avg"].mask(
+                        self.math_df["rolling_slope"] < -SLOPE_CR, inplace=True)
+        # SLOPE_CR is abs value so have to apply it on high and low end.
+        print(np.mean(self.math_df["rolling_avg"]))
+
 
     def get_run_type(self):
         return "SSRun"

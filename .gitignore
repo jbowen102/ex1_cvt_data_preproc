@@ -2,6 +2,7 @@ __pycache__/
 .~*
 *.pyc
 *.out
+run_test.py
 /raw_data
 /sync_data
 /plots
