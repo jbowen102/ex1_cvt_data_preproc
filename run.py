@@ -102,17 +102,17 @@ class RunGroup(object):
     def create_downhill_run(self, filename):
         return DownhillRun(os.path.join(RAW_INCA_ROOT, filename))
 
-    def plot_runs(self, overwrite=False):
+    def plot_runs(self, overwrite=False, desc_str=None):
         # If only one run in group is to be processed, this will only loop once.
         for run_num in self.runs_to_process:
             RunObj = self.runs_to_process[run_num]
-            RunObj.plot_data(overwrite)
+            RunObj.plot_data(overwrite, desc_str)
 
-    def export_runs(self, overwrite=False):
+    def export_runs(self, overwrite=False, desc_str=None):
         # If only one run in group is to be processed, this will only loop once.
         for run_num in self.runs_to_process:
             RunObj = self.runs_to_process[run_num]
-            RunObj.export_data(overwrite)
+            RunObj.export_data(overwrite, desc_str)
 
     def prompt_for_run(self):
         """Prompts user for what run to process
@@ -375,7 +375,7 @@ class SingleRun(object):
         self.sync_df["CVT_ratio_calc"] = self.math_df["cvt_ratio"].copy()
         CHANNEL_UNITS["CVT_ratio_calc"] = "rpm/rpm"
 
-    def plot_data(self, overwrite=False):
+    def plot_data(self, overwrite=False, description=None):
         # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
         ax1 = plt.subplot(211)
         plt.plot(self.raw_inca_df.index, self.raw_inca_df["throttle"],
@@ -397,7 +397,10 @@ class SingleRun(object):
         plt.ylabel("Throttle (deg)")
         plt.legend(loc="best")
 
-        fig_filepath = "./figs/%s_fig.png" % self.run_label
+        if description:
+            fig_filepath = "./figs/%s_fig_%s.png" % (self.run_label, description)
+        else:
+            fig_filepath = "./figs/%s_fig.png" % self.run_label
 
         if os.path.exists(fig_filepath) and not overwrite:
             ow_answer = ""
@@ -416,7 +419,7 @@ class SingleRun(object):
         # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
         plt.clf()
 
-    def export_data(self, overwrite=False):
+    def export_data(self, overwrite=False, description=None):
         # Create to list of lists for easier writing out
         # Convert time values from hundredths of a second to seconds
         time_series = [round(ti/SAMPLING_FREQ,2)
@@ -446,9 +449,11 @@ class SingleRun(object):
         # Add metadata string (removing final unneded separator)
         sync_array.insert(0, [self.get_meta_str()])
 
-        # Create new CSV file and write out. Closes automatically at end of
-        # with/as block.
-        sync_basename = "%s_Sync.csv" % self.run_label
+        if description:
+            sync_basename = "%s_Sync_%s.csv" % (self.run_label, description)
+        else:
+            sync_basename = "%s_Sync.csv" % self.run_label
+
         sync_filename = "./sync_data/%s" % sync_basename
 
         # Check if file exists already. Prompt user for overwrite decision.
@@ -460,6 +465,8 @@ class SingleRun(object):
             if ow_answer.lower() == "n":
                 return
 
+        # Create new CSV file and write out. Closes automatically at end of
+        # with/as block.
         # This block should not run if answered no to overwrite above.
         with open(sync_filename, 'w+') as sync_file:
             sync_file_csv = csv.writer(sync_file, dialect="excel")
@@ -796,16 +803,20 @@ def main_prog():
                     "sync_data folder without prompting.", action="store_true")
     parser.add_argument("-p", "--plot", help="Plot data before and after "
                                             "processing.", action="store_true")
+    parser.add_argument("-d", "--desc", help="Specify a description string to "
+        "append to output file names - data and plot files (if -p also used)",
+                                                        type=str, default="")
+    # https://www.programcreek.com/python/example/748/argparse.ArgumentParser
     args = parser.parse_args()
 
     AllRuns = RunGroup(args.auto)
 
     if args.plot and PLOT_LIB_PRESENT:
-        AllRuns.plot_runs(args.over)
+        AllRuns.plot_runs(args.over, args.desc)
     elif args.plot:
         print("\nFailed to import matplotlib. Cannot plot data.")
 
-    AllRuns.export_runs(args.over)
+    AllRuns.export_runs(args.over, args.desc)
 
 
 if __name__ == "__main__":
