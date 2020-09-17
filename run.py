@@ -180,7 +180,7 @@ class SingleRun(object):
         # Open file with read priveleges.
         # File automatically closed at end of "with/as" block.
         with open(self.INCA_path, "r") as inca_ascii_file:
-            print("Reading INCA data from %s" % self.INCA_path) # debug
+            print("\nReading INCA data from %s" % self.INCA_path) # debug
             INCA_file_in = csv.reader(inca_ascii_file, delimiter="\t")
             # https://stackoverflow.com/questions/7856296/parsing-csv-tab-delimited-txt-file-with-python
 
@@ -376,6 +376,9 @@ class SingleRun(object):
         CHANNEL_UNITS["CVT_ratio_calc"] = "rpm/rpm"
 
     def plot_data(self, overwrite=False, description=None):
+        self.plot_abridge_compare(overwrite, description)
+
+    def plot_abridge_compare(self, overwrite=False, description=None):
         # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
         ax1 = plt.subplot(211)
         plt.plot(self.raw_inca_df.index, self.raw_inca_df["throttle"],
@@ -398,9 +401,9 @@ class SingleRun(object):
         plt.legend(loc="best")
 
         if description:
-            fig_filepath = "./figs/%s_fig_%s.png" % (self.run_label, description)
+            fig_filepath = "./figs/%s_abr-%s.png" % (self.run_label, description)
         else:
-            fig_filepath = "./figs/%s_fig.png" % self.run_label
+            fig_filepath = "./figs/%s_abr.png" % self.run_label
 
         if os.path.exists(fig_filepath) and not overwrite:
             ow_answer = ""
@@ -658,9 +661,9 @@ class SSRun(SingleRun):
     def add_math_channels(self):
         # This performs all the actions in the parent class's method
         super(SSRun, self).add_math_channels()
-        self.add_avg_speed()
+        self.add_ss_avgs()
 
-    def add_avg_speed(self):
+    def add_ss_avgs(self):
         WIN_SIZE_AVG = 201  # window size for speed rolling avg.
         WIN_SIZE_SLOPE = 21 # win size for rolling slope of speed rolling avg.
 
@@ -723,24 +726,27 @@ class SSRun(SingleRun):
         # and low end.
 
         # "Mask off" by assigning NaN where criteria not met.
-        self.math_df["gs_rolling_avg"].mask(criteria_mask, inplace=True)
-        self.math_df["es_rolling_avg"].mask(criteria_mask, inplace=True)
+        self.math_df["gs_rol_avg_mskd"] = self.math_df["gs_rolling_avg"].mask(
+                                                                criteria_mask)
+        self.math_df["es_rol_avg_mskd"] = self.math_df["es_rolling_avg"].mask(
+                                                                criteria_mask)
         self.math_df["filtered_cvt"].mask(criteria_mask, inplace=True)
         # Masking these too to calculate avg slope off SS region later:
         self.math_df["gs_rolling_slope"].mask(criteria_mask, inplace=True)
         self.math_df["es_rolling_slope"].mask(criteria_mask, inplace=True)
+        # https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#indexing-where-mask
 
         # Calculate overall (aggregate) mean of each filtereed/masked channel
         # Prefill with NaN and assign mean to first element
         self.math_df["SS_gnd_spd_avg"] = np.nan
         self.math_df["SS_gnd_spd_avg"][0] = np.mean(
-                                                 self.math_df["gs_rolling_avg"])
+                                                self.math_df["gs_rol_avg_mskd"])
         self.math_df["SS_gnd_spd_slope_avg"] = np.nan
         self.math_df["SS_gnd_spd_slope_avg"][0] = np.mean(
                                                self.math_df["gs_rolling_slope"])
         self.math_df["SS_eng_spd_avg"] = np.nan
         self.math_df["SS_eng_spd_avg"][0] = np.mean(
-                                                 self.math_df["es_rolling_avg"])
+                                                self.math_df["es_rol_avg_mskd"])
         self.math_df["SS_eng_spd_slope_avg"] = np.nan
         self.math_df["SS_eng_spd_slope_avg"][0] = np.mean(
                                                self.math_df["es_rolling_slope"])
@@ -771,6 +777,68 @@ class SSRun(SingleRun):
         # https://medium.com/the-code-monster/split-a-dataset-into-train-and-test-datasets-using-sk-learn-acc7fd1802e0
         # https://towardsdatascience.com/regression-plots-with-pandas-and-numpy-faf2edbfad4f
         # https://data36.com/linear-regression-in-python-numpy-polyfit/
+
+    def plot_data(self, overwrite=False, description=None):
+        # This performs all the actions in the parent class's method
+        super(SSRun, self).plot_data(overwrite, description)
+        self.plot_ss_range(overwrite, description)
+
+    def plot_ss_range(self, overwrite=False, description=None):
+        ax1 = plt.subplot(311)
+        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gnd_speed"],
+                                                        label="Ground Speed")
+        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.math_df["gs_rolling_avg"],
+                                                        label="Rolling Avg")
+        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.math_df["gs_rol_avg_mskd"],
+                                                        label="Steady-state")
+        plt.title("Ground Speed vs. Time (Run %s)" % self.run_label)
+        plt.ylabel("Speed (mph)")
+        plt.legend(loc="best")
+        # plt.setp(ax1.get_xticklabels(), visible=False)
+
+        ax2 = plt.subplot(312)
+        # Convert DF indices from hundredths of a second to seconds
+        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["engine_spd"],
+                                                        label="Engine Speed")
+        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.math_df["es_rolling_avg"],
+                                                        label="Rolling Avg")
+        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.math_df["es_rol_avg_mskd"],
+                                                        label="Steady-state")
+
+        plt.xlabel("Time (s)")
+        plt.ylabel("Engine Speed (rpm)")
+        plt.legend(loc="best")
+
+        ax3 = plt.subplot(313)
+        # Convert DF indices from hundredths of a second to seconds
+        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["throttle"],
+                                                        label="Throttle")
+
+        plt.xlabel("Time (s)")
+        plt.ylabel("Throttle (deg)")
+        plt.legend(loc="best")
+
+        if description:
+            fig_filepath = "./figs/%s_ss-%s.png" % (self.run_label, description)
+        else:
+            fig_filepath = "./figs/%s_ss.png" % self.run_label
+
+        if os.path.exists(fig_filepath) and not overwrite:
+            ow_answer = ""
+            while ow_answer.lower() not in ["y", "n"]:
+                ow_answer = input("\n%s already exists in figs folder. "
+                        "Overwrite? (Y/N)\n> " % os.path.basename(fig_filepath))
+            if ow_answer.lower() == "n":
+                plt.clf()
+                return
+
+        print("\nExporting plot as %s..." % fig_filepath)
+        plt.savefig(fig_filepath)
+        print("...done")
+        # plt.show() # can't use w/ WSL.
+        # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
+        # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
+        plt.clf()
 
     def get_run_type(self):
         return "SSRun"
