@@ -791,25 +791,25 @@ class SSRun(SingleRun):
                                                         label="Rolling Avg")
         plt.plot(self.sync_df.index/SAMPLING_FREQ, self.math_df["gs_rol_avg_mskd"],
                                                         label="Steady-state")
-        plt.title("Ground Speed vs. Time (Run %s)" % self.run_label)
+        plt.title("Steady-state Isolation (Run %s)" % self.run_label)
         plt.ylabel("Speed (mph)")
         plt.legend(loc="best")
-        # plt.setp(ax1.get_xticklabels(), visible=False)
+        plt.setp(ax1.get_xticklabels(), visible=False)
 
-        ax2 = plt.subplot(312)
+        ax2 = plt.subplot(312, sharex=ax1)
         # Convert DF indices from hundredths of a second to seconds
-        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["engine_spd"],
-                                                        label="Engine Speed")
-        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.math_df["es_rolling_avg"],
-                                                        label="Rolling Avg")
-        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.math_df["es_rol_avg_mskd"],
-                                                        label="Steady-state")
+        plt.plot(self.sync_df.index/SAMPLING_FREQ,
+                        self.sync_df["engine_spd"], label="Engine Speed")
+        plt.plot(self.sync_df.index/SAMPLING_FREQ,
+                        self.math_df["es_rolling_avg"], label="Rolling Avg")
+        plt.plot(self.sync_df.index/SAMPLING_FREQ,
+                        self.math_df["es_rol_avg_mskd"], label="Steady-state")
 
-        plt.xlabel("Time (s)")
         plt.ylabel("Engine Speed (rpm)")
         plt.legend(loc="best")
+        plt.setp(ax2.get_xticklabels(), visible=False)
 
-        ax3 = plt.subplot(313)
+        ax3 = plt.subplot(313, sharex=ax1)
         # Convert DF indices from hundredths of a second to seconds
         plt.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["throttle"],
                                                         label="Throttle")
