@@ -1,3 +1,4 @@
+print("Importing modules...")
 import os           # Used for analyzing file paths and directories
 import csv          # Needed to read in and write out data
 import argparse     # Used to parse optional command-line arguments
@@ -5,6 +6,7 @@ import math         # Using pi to convert linear speed to angular speed.
 import pandas as pd # Series and DataFrame structures
 import numpy as np
 import traceback
+import time
 from datetime import datetime
 import getpass
 
@@ -17,6 +19,7 @@ try:
 except ImportError:
     PLOT_LIB_PRESENT = False
 # https://stackoverflow.com/questions/3496592/conditional-import-of-modules-in-python
+print("...done\n")
 
 
 # global constancts
@@ -76,14 +79,35 @@ class RunGroup(object):
             if os.path.isdir(os.path.join(RAW_INCA_ROOT, file)):
                 continue # ignore any directories found
 
-            if "decel" in file.lower():
+            if "decel" in file.lower() or "deccel" in file.lower():
                 # ThisRun = self.create_downhill_run(file)
-                input("Skipping file %s because program can't process decel "
+                input("Skipping file '%s' because program can't process decel "
                 "runs yet.\nPress Enter to acknowledge." % file)
+                print("\n")
                 continue
             else:
-                ThisRun = self.create_ss_run(file)
+                # ThisRun = self.create_ss_run(file)
+                try:
+                    ThisRun = self.create_ss_run(file)
+                except FilenameError as exception_text:
+                    print(exception_text)
+                    # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
+                    input("\nRun creation failed with file '%s'.\n"
+                          "Press Enter to skip this run." % (file))
+                    print("\n")
+                    continue # Don't add to run dict
 
+            if ThisRun.get_run_label() in self.run_dict:
+                # catch duplicate run nums.
+                input("\nMore than one run '%s' found in %s:\n"
+                    "\t'%s'\n"
+                    "\t'%s'\n"
+                    "First one will be kept.\nPress Enter to acknowledge."
+                    % (ThisRun.get_run_label(), RAW_INCA_ROOT,
+                     self.run_dict[ThisRun.get_run_label()].get_inca_filename(),
+                     file))
+                print("\n")
+                continue
             self.run_dict[ThisRun.get_run_label()] = ThisRun
 
     def create_ss_run(self, filename):
@@ -101,18 +125,19 @@ class RunGroup(object):
             OnlyRun = self.prompt_for_run()
             self.runs_to_process = {OnlyRun.get_run_label(): OnlyRun}
 
+        bad_runs = []
         for run_num in self.runs_to_process:
             RunObj = self.runs_to_process[run_num]
-            bad_runs = []
             try:
                 RunObj.process_data()
             except Exception:
                 exception_trace = traceback.format_exc()
                 # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
                 out_file = log_exception(exception_trace, RunObj.get_output())
-                input("\nProcessing failed on run %s.\nOutput and exception "
-                    "trace written to %s on Desktop.\n"
+                input("\nProcessing failed on run '%s'.\nOutput and exception "
+                    "trace written to '%s' on Desktop.\n"
                     "Press Enter to skip this run." % (run_num, out_file))
+                print("\n")
                 # Stage for removal from run dict.
                 bad_runs.append(run_num)
                 continue
@@ -124,18 +149,21 @@ class RunGroup(object):
 
     def plot_runs(self, overwrite=False, desc_str=None):
         # If only one run in group is to be processed, this will only loop once.
+        if not self.runs_to_process:
+            print("\nNo valid runs to plot.\n")
+            return
+        bad_runs = []
         for run_num in self.runs_to_process:
-            bad_runs = []
+            RunObj = self.runs_to_process[run_num]
             try:
-                RunObj = self.runs_to_process[run_num]
                 RunObj.plot_data(overwrite, desc_str)
             except Exception:
                 exception_trace = traceback.format_exc()
                 # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
                 out_file = log_exception(exception_trace, RunObj.get_output())
-                input("\nPlotting failed on run %s.\nOutput and exception "
-                    "trace written to %s on Desktop.\n"
-                    "Press Enter to skip this run." % (run_num, out_file))
+                input("\nPlotting failed on run '%s'.\nOutput and exception "
+                  "trace written to '%s' on Desktop.\n"
+                     "Press Enter to skip this run." % (run_num, out_file))
                 # Stage for removal from run dict.
                 bad_runs.append(run_num)
                 continue
@@ -145,20 +173,22 @@ class RunGroup(object):
                 # in later calls.
                 self.runs_to_process.pop(bad_run)
 
-
     def export_runs(self, overwrite=False, desc_str=None):
         # If only one run in group is to be processed, this will only loop once.
+        if not self.runs_to_process:
+            print("\nNo valid runs to export.\n")
+            return
+        bad_runs = []
         for run_num in self.runs_to_process:
-            bad_runs = []
+            RunObj = self.runs_to_process[run_num]
             try:
-                RunObj = self.runs_to_process[run_num]
                 RunObj.export_data(overwrite, desc_str)
             except Exception:
                 exception_trace = traceback.format_exc()
                 # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
                 out_file = log_exception(exception_trace, RunObj.get_output())
-                input("\nExporting failed on run %s.\nOutput and exception "
-                    "trace written to %s on Desktop.\n"
+                input("\nExporting failed on run '%s'.\nOutput and exception "
+                    "trace written to '%s' on Desktop.\n"
                     "Press Enter to skip this run." % (run_num, out_file))
                 # Stage for removal from run dict.
                 bad_runs.append(run_num)
@@ -181,7 +211,7 @@ class RunGroup(object):
         if TargetRun:
             return TargetRun
         else:
-            print("No INCA file found matching that run.")
+            print("No valid INCA file found matching that run.")
             return self.prompt_for_run()
 
 
@@ -193,7 +223,23 @@ class SingleRun(object):
         self.Doc = Output() # Create a new object to store and print output info
         self.INCA_path = INCA_path
         self.INCA_filename = os.path.basename(self.INCA_path)
-        self.run_label = self.INCA_filename.split("_")[1][0:4]
+        self.parse_run_num()
+
+    def parse_run_num(self):
+        try:
+            self.run_label = self.INCA_filename.split("_")[1][0:4]
+        except IndexError:
+            raise FilenameError("INCA filename '%s' not in correct format.\n"
+            "Expected format is "
+            "'[pretext]_[four-digit run num][anything else]'.\nNeed the four "
+            "characters that follow the first underscore to be run num."
+                                                        % self.INCA_filename)
+        if any(not char.isdigit() for char in self.run_label):
+            raise FilenameError("INCA filename '%s' not in correct format.\n"
+            "Expected format is "
+            "'[pretext]_[four-digit run num][anything else]'.\nNeed the four "
+            "characters that follow the first underscore to be run num."
+                                                        % self.INCA_filename)
 
         # Metadata string to document in outuput file
         self.meta_str = "INCA_file: '%s' | " % self.INCA_filename
@@ -215,11 +261,22 @@ class SingleRun(object):
                 continue # ignore any directories found
             # Split the extension off the file name, then isolate the final two
             # numbers off the date
-            run_num_i = os.path.splitext(eDAQ_run)[0].split("_")[1][0:2]
+            try:
+                run_num_i = os.path.splitext(eDAQ_run)[0].split("_")[1][0:2]
+            except IndexError:
+                raise FilenameError("eDAQ filename '%s' not in correct format.\n"
+                "Expected format is "
+                "'[pretext]_[two-digit file num][anything else]'.\nNeed the two "
+                "characters that follow the first underscore to be file num.\n"
+                "This will cause problems with successive runs until you fix"
+                "the filename or remove the offending file from %s."
+                                                    % (eDAQ_run, RAW_EDAQ_ROOT))
             if run_num_i == eDAQ_file_num:
                 # break out of loop while "eDAQ_run" is set to correct filename
                 found_eDAQ = True
                 break
+                # There is no checking for multiple eDAQ files with same run
+                # num. The first one found will be used.
         if found_eDAQ:
             self.eDAQ_path = os.path.join(RAW_EDAQ_ROOT, eDAQ_run)
             # Document in metadata string for later file output.
@@ -236,7 +293,7 @@ class SingleRun(object):
         # Open file with read priveleges.
         # File automatically closed at end of "with/as" block.
         with open(self.INCA_path, "r") as inca_ascii_file:
-            self.Doc.print("Reading INCA data from %s" % self.INCA_path) # debug
+            self.Doc.print("\nReading INCA data from %s" % self.INCA_path) # debug
             INCA_file_in = csv.reader(inca_ascii_file, delimiter="\t")
             # https://stackoverflow.com/questions/7856296/parsing-csv-tab-delimited-txt-file-with-python
 
@@ -533,6 +590,9 @@ class SingleRun(object):
 
     def get_run_label(self):
         return self.run_label
+
+    def get_inca_filename(self):
+        return self.INCA_filename
 
     def get_meta_str(self):
         return self.meta_str[:-3]
@@ -856,6 +916,9 @@ def log_exception(excp_str, Out):
     onedrive = [folder for folder in home_contents if "OneDrive -" in folder][0]
     desktop_path = "/mnt/c/Users/%s/%s/Desktop" % (username, onedrive)
 
+    # Wait one second to prevent overwriting previous error if it occurred less
+    # than one second ago.
+    time.sleep(1)
     timestamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
     # https://stackoverflow.com/questions/415511/how-to-get-the-current-time-in-python
     filename = timestamp + "_CVT_data_processing_error.txt"
