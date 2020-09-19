@@ -53,14 +53,9 @@ class DataReadError(Exception):
 class DataSyncError(Exception):
     pass
 
-class TimeStampError(Exception):
-    pass
-
 class DataTrimError(Exception):
     pass
 
-class CVTCalcError(Exception):
-    pass
 
 class RunGroup(object):
     """Represents a collection of runs from the raw_data directory."""
@@ -311,14 +306,15 @@ class SingleRun(object):
                     for n, channel in enumerate(INCA_CHANNELS):
                         raw_inca_dict[channel].append(float(INCA_row[n]))
 
-        # Separate out time. Round to nearest hundredth.
-        inca_time_series = raw_inca_dict["time"].copy()
-        # self.Doc.print(inca_time_series[:20])
-        del raw_inca_dict["time"]
-
+        # Convert the dict to a pandas DataFrame for easier manipulation
+        # and analysis
         self.raw_inca_df = pd.DataFrame(data=raw_inca_dict,
-                                                        index=inca_time_series)
+                                                    index=raw_inca_dict["time"])
+        self.raw_inca_df.rename(columns = {"time": "raw_time"}, inplace=True)
+        # https://datatofish.com/rename-columns-pandas-dataframe/
         self.Doc.print("...done")
+        self.Doc.print("\nraw_inca_df after reading in data:", True)
+        self.Doc.print(self.raw_inca_df.to_string(max_rows=10, show_dimensions=True), True)
 
         # now read eDAQ data
         with open(self.eDAQ_path, "r") as edaq_ascii_file:
@@ -364,53 +360,48 @@ class SingleRun(object):
                         raw_edaq_dict[channel].append(
                                         float(eDAQ_row[edaq_run_start_col+n]))
 
-        # Separate out time
-        edaq_time_series = raw_edaq_dict["time"].copy()
-        # self.Doc.print(edaq_time_series[:20])
-        del raw_edaq_dict["time"]
-
-        # self.Doc.print(edaq_time_series[:10])
-        # self.Doc.print(raw_edaq_dict["gnd_speed"][:10])
-        # self.Doc.print(raw_edaq_dict["pedal_sw"][:10])
-
+        # Convert the dict to a pandas DataFrame for easier manipulation
+        # and analysis
         self.raw_edaq_df = pd.DataFrame(data=raw_edaq_dict,
-                                                        index=edaq_time_series)
+                                                    index=raw_edaq_dict["time"])
+        self.raw_edaq_df.rename(columns = {"time": "raw_time"}, inplace=True)
+
         self.Doc.print("...done")
+        self.Doc.print("raw_edaq_df after reading in data:", True)
+        self.Doc.print(self.raw_edaq_df.to_string(max_rows=10, show_dimensions=True), True)
 
     def sync_data(self):
-        self.inca_df = self.raw_inca_df.copy(deep=True)
-        self.edaq_df = self.raw_edaq_df.copy(deep=True)
-        # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.copy.html
-
+        # Create copies of the raw dfs to modify and merge. Don't need raw_time.
+        inca_df = self.raw_inca_df.drop(columns="raw_time")
+        edaq_df = self.raw_edaq_df.drop(columns="raw_time")
+        # https://stackoverflow.com/questions/29763620/how-to-select-all-columns-except-one-column-in-pandas
         # Offset time series to start at zero.
-        self.shift_time_series(self.inca_df, zero=True)
-        self.shift_time_series(self.edaq_df, zero=True)
+        self.shift_time_series(inca_df, zero=True)
+        self.shift_time_series(edaq_df, zero=True)
 
         # Convert index from seconds to hundredths of a second
-        self.inca_df.set_index(pd.Index([int(round(ti * SAMPLING_FREQ))
-                                for ti in self.inca_df.index]), inplace=True)
-        self.edaq_df.set_index(pd.Index([int(round(ti * SAMPLING_FREQ))
-                                for ti in self.edaq_df.index]), inplace=True)
+        inca_df.set_index(pd.Index([int(round(ti * SAMPLING_FREQ))
+                                        for ti in inca_df.index]), inplace=True)
+        edaq_df.set_index(pd.Index([int(round(ti * SAMPLING_FREQ))
+                                        for ti in edaq_df.index]), inplace=True)
         # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.set_index.html
 
         # Check if any pedal events exist
-        if self.inca_df.loc[self.inca_df["pedal_sw"] == 1].empty:
+        if inca_df.loc[inca_df["pedal_sw"] == 1].empty:
             raise DataSyncError("No pedal event found in INCA data (looking for"
             " value of 1 in pedal switch column). Check input pedal data and "
             "ordering of input file's columns.")
-        if self.edaq_df.loc[self.edaq_df["pedal_sw"] == 1].empty:
+        if edaq_df.loc[edaq_df["pedal_sw"] == 1].empty:
             raise DataSyncError("No pedal event found in eDAQ data (looking for"
             " value of 1 in pedal switch column). Check input pedal data and "
             "ordering of input file's columns.")
         # find first pedal switch event
         # https://stackoverflow.com/questions/16683701/in-pandas-how-to-get-the-index-of-a-known-value
-        inca_high_start_t = self.inca_df.loc[
-                                        self.inca_df["pedal_sw"] == 1].index[0]
-        edaq_high_start_t = self.edaq_df.loc[
-                                        self.edaq_df["pedal_sw"] == 1].index[0]
+        inca_high_start_t = inca_df.loc[inca_df["pedal_sw"] == 1].index[0]
+        edaq_high_start_t = edaq_df.loc[edaq_df["pedal_sw"] == 1].index[0]
         self.Doc.print("Start times (inca, edaq): %.2fs, %.2fs"
-                                        % (inca_high_start_t / SAMPLING_FREQ,
-                                           edaq_high_start_t / SAMPLING_FREQ))
+                                    % (inca_high_start_t / SAMPLING_FREQ,
+                                       edaq_high_start_t / SAMPLING_FREQ), True)
 
         # Test first to see if either data set has first pedal event earlier
         # than 1s. If so, that's the new time for both files to line up at.
@@ -423,24 +414,20 @@ class SingleRun(object):
         inca_target_t = inca_high_start_t - start_buffer
         edaq_target_t = edaq_high_start_t - start_buffer
 
-        self.shift_time_series(self.inca_df, offset_val=-inca_target_t)
-        self.shift_time_series(self.edaq_df, offset_val=-edaq_target_t)
-        # self.Doc.print("new inca index start: %d" % self.inca_df.index[0])
-        # self.Doc.print("new edaq index start: %d" % self.edaq_df.index[0])
+        self.shift_time_series(inca_df, offset_val=-inca_target_t)
+        self.shift_time_series(edaq_df, offset_val=-edaq_target_t)
+        # self.Doc.print("new inca index start: %d" % inca_df.index[0])
+        # self.Doc.print("new edaq index start: %d" % edaq_df.index[0])
 
         # Unify datasets into one DataFrame
         # Slice out values before t=0 (1s before first pedal press)
         # Automatically truncates longer data set
         # The only channel in eDAQ that's valuable, and unique is gnd_speed.
-        self.sync_df = pd.merge(self.inca_df.loc[0:],
-                                self.edaq_df["gnd_speed"].loc[0:],
-                                left_index=True, right_index=True)
+        self.sync_df = pd.merge(inca_df.loc[0:], edaq_df["gnd_speed"].loc[0:],
+                                        left_index=True, right_index=True)
 
-        # self.Doc.print(len(self.inca_df))
-        # self.Doc.print(len(self.inca_df.loc[0:]))
-        # self.Doc.print(len(self.edaq_df))
-        # self.Doc.print(len(self.edaq_df.loc[0:]))
-        # input(len(self.sync_df))
+        self.Doc.print("\nsync_df at end of sync:", True)
+        self.Doc.print(self.sync_df.to_string(max_rows=10, show_dimensions=True), True)
 
     def shift_time_series(self, df, zero=False, offset_val=None):
         """If offset_val param specified, add this signed value to all time
@@ -647,7 +634,7 @@ class SSRun(SingleRun):
             # Main loop evaluates pedal-down event. Stores event start and end
             # times if inner loop finds throttle was >45deg for >2s during event
 
-            if self.sync_df["pedal_sw"][ti]:
+            if self.sync_df["pedal_sw"][ti] == 1:
                 if not pedal_down:
                     self.Doc.print("\tPedal actuated at time\t\t%0.2fs" %
                                                         (ti / SAMPLING_FREQ))
@@ -771,6 +758,8 @@ class SSRun(SingleRun):
         # Now re-assemble the DataFrame with only valid events.
         # https://pandas.pydata.org/pandas-docs/stable/user_guide/merging.html
         self.sync_df = pd.concat(valid_events)
+        self.Doc.print("\nsync_df after abridgement:", True)
+        self.Doc.print(self.sync_df.to_string(max_rows=10, show_dimensions=True), True)
 
         self.Doc.print("\nData time span: %.2f -> %.2f (%d data points)" %
                (self.sync_df.index[0]/SAMPLING_FREQ,
