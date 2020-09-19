@@ -310,7 +310,7 @@ class SingleRun(object):
         # and analysis
         self.raw_inca_df = pd.DataFrame(data=raw_inca_dict,
                                                     index=raw_inca_dict["time"])
-        self.raw_inca_df.rename(columns = {"time": "raw_time"}, inplace=True)
+        self.raw_inca_df.rename(columns = {"time": "raw_inca_time"}, inplace=True)
         # https://datatofish.com/rename-columns-pandas-dataframe/
         self.Doc.print("...done")
         self.Doc.print("\nraw_inca_df after reading in data:", True)
@@ -364,27 +364,38 @@ class SingleRun(object):
         # and analysis
         self.raw_edaq_df = pd.DataFrame(data=raw_edaq_dict,
                                                     index=raw_edaq_dict["time"])
-        self.raw_edaq_df.rename(columns = {"time": "raw_time"}, inplace=True)
+        self.raw_edaq_df.rename(columns = {"time": "raw_edaq_time"}, inplace=True)
 
         self.Doc.print("...done")
         self.Doc.print("raw_edaq_df after reading in data:", True)
         self.Doc.print(self.raw_edaq_df.to_string(max_rows=10, show_dimensions=True), True)
 
     def sync_data(self):
-        # Create copies of the raw dfs to modify and merge. Don't need raw_time.
-        inca_df = self.raw_inca_df.drop(columns="raw_time")
-        edaq_df = self.raw_edaq_df.drop(columns="raw_time")
-        # https://stackoverflow.com/questions/29763620/how-to-select-all-columns-except-one-column-in-pandas
-        # Offset time series to start at zero.
-        self.shift_time_series(inca_df, zero=True)
-        self.shift_time_series(edaq_df, zero=True)
+        # Create copies of the raw dfs to modify and merge.
+        inca_df = self.raw_inca_df.copy(deep=True)
+        edaq_df = self.raw_edaq_df.copy(deep=True)
 
         # Convert index from seconds to hundredths of a second
-        inca_df.set_index(pd.Index([int(round(ti * SAMPLING_FREQ))
-                                        for ti in inca_df.index]), inplace=True)
+        # It's simple for eDAQ data.
         edaq_df.set_index(pd.Index([int(round(ti * SAMPLING_FREQ))
                                         for ti in edaq_df.index]), inplace=True)
         # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.set_index.html
+        # Offset time series to start at zero.
+        self.shift_time_series(edaq_df, zero=True)
+
+        # INCA time increments are slightly off, so error accumulates and
+        # can eventually cause issues.
+        # Convert INCA to deltas by subtracting each time value from previous
+        # one, rounding the delta and adding to the previous (rounded) value.
+        # Calculate the rolling difference (delta) between each pair of vals.
+        deltas = inca_df["raw_inca_time"].diff()
+        # https://stackoverflow.com/questions/13114512/calculating-difference-between-two-rows-in-python-pandas
+        deltas[0] = 0 # first val was NaN
+        # Round the series then do a cumulative summation:
+        deltas = pd.Series([round(ti * SAMPLING_FREQ) for ti in deltas])
+        rolling_delt_times = deltas.cumsum()
+        # Assign as the index now (converting to int)
+        inca_df.set_index(pd.Index(rolling_delt_times.astype(int)), inplace=True)
 
         # Check if any pedal events exist
         if inca_df.loc[inca_df["pedal_sw"] == 1].empty:
@@ -399,7 +410,7 @@ class SingleRun(object):
         # https://stackoverflow.com/questions/16683701/in-pandas-how-to-get-the-index-of-a-known-value
         inca_high_start_t = inca_df.loc[inca_df["pedal_sw"] == 1].index[0]
         edaq_high_start_t = edaq_df.loc[edaq_df["pedal_sw"] == 1].index[0]
-        self.Doc.print("Start times (inca, edaq): %.2fs, %.2fs"
+        self.Doc.print("\nStart times (inca, edaq): %.2fs, %.2fs"
                                     % (inca_high_start_t / SAMPLING_FREQ,
                                        edaq_high_start_t / SAMPLING_FREQ), True)
 
@@ -423,7 +434,9 @@ class SingleRun(object):
         # Slice out values before t=0 (1s before first pedal press)
         # Automatically truncates longer data set
         # The only channel in eDAQ that's valuable, and unique is gnd_speed.
-        self.sync_df = pd.merge(inca_df.loc[0:], edaq_df["gnd_speed"].loc[0:],
+
+        self.sync_df = pd.merge(inca_df.loc[0:],
+        edaq_df.loc[0:, edaq_df.columns.isin(["raw_edaq_time", "gnd_speed"])],
                                         left_index=True, right_index=True)
 
         self.Doc.print("\nsync_df at end of sync:", True)
@@ -522,16 +535,19 @@ class SingleRun(object):
         plt.clf()
 
     def export_data(self, overwrite=False, description=None):
+        export_df = self.sync_df.drop(columns=["raw_inca_time", "raw_edaq_time"])
+        # https://stackoverflow.com/questions/29763620/how-to-select-all-columns-except-one-column-in-pandas
+
         # Create to list of lists for easier writing out
         # Convert time values from hundredths of a second to seconds
         time_series = [round(ti/SAMPLING_FREQ,2)
-                                    for ti in self.sync_df.index.tolist()]
+                                    for ti in export_df.index.tolist()]
 
         # # Replace any NaNs with blanks
-        self.sync_df.fillna("", inplace=True)
+        export_df.fillna("", inplace=True)
         # https://stackoverflow.com/questions/26837998/pandas-replace-nan-with-blank-empty-string
 
-        sync_array = self.sync_df.values.tolist()
+        sync_array = export_df.values.tolist()
         # https://stackoverflow.com/questions/28006793/pandas-dataframe-to-list-of-lists
 
         # for line_no, inca_line in enumerate(sync_array):
@@ -541,7 +557,7 @@ class SingleRun(object):
             # https://stackoverflow.com/questions/8537916/whats-the-idiomatic-syntax-for-prepending-to-a-short-python-list
 
         # Format header rows
-        channel_list = ["time"] + self.sync_df.columns.tolist()
+        channel_list = ["time"] + export_df.columns.tolist()
         header_rows = [channel_list, [CHANNEL_UNITS[c] for c in channel_list]]
 
         # Add headers to array
