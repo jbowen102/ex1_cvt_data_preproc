@@ -64,8 +64,9 @@ class CVTCalcError(Exception):
 
 class RunGroup(object):
     """Represents a collection of runs from the raw_data directory."""
-    def __init__(self, process_all=False):
+    def __init__(self, process_all=False, verbose=False):
         # create SingleRun object for each run but don't read in data yet.
+        self.verbosity = verbose
         self.build_run_dict()
         self.process_runs(process_all)
 
@@ -111,10 +112,10 @@ class RunGroup(object):
             self.run_dict[ThisRun.get_run_label()] = ThisRun
 
     def create_ss_run(self, filename):
-        return SSRun(os.path.join(RAW_INCA_ROOT, filename))
+        return SSRun(os.path.join(RAW_INCA_ROOT, filename), self.verbosity)
 
     def create_downhill_run(self, filename):
-        return DownhillRun(os.path.join(RAW_INCA_ROOT, filename))
+        return DownhillRun(os.path.join(RAW_INCA_ROOT, filename), self.verbosity)
 
     def process_runs(self, process_all=False):
         if process_all:
@@ -219,8 +220,9 @@ class SingleRun(object):
     """Represents a single run from the raw_data directory.
     No data is read in until read_data() called.
     """
-    def __init__(self, INCA_path):
-        self.Doc = Output() # Create a new object to store and print output info
+    def __init__(self, INCA_path, verbose=False):
+        # Create a new object to store and print output info
+        self.Doc = Output(verbose)
         self.INCA_path = INCA_path
         self.INCA_filename = os.path.basename(self.INCA_path)
         self.parse_run_num()
@@ -918,24 +920,28 @@ def log_exception(excp_str, Out):
 
     # Wait one second to prevent overwriting previous error if it occurred less
     # than one second ago.
-    time.sleep(1)
     timestamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
     # https://stackoverflow.com/questions/415511/how-to-get-the-current-time-in-python
     filename = timestamp + "_CVT_data_processing_error.txt"
 
+    print(excp_str)
+    time.sleep(1)
     with open(os.path.join(desktop_path, filename), "w") as log_file:
         log_file.write(Out.get_log_dump() + excp_str)
 
-    print(excp_str)
     return filename
 
 
 class Output(object):
-    def __init__(self):
+    def __init__(self, verbose):
+        self.verbose = verbose
         self.log_string = ""
-    def print(self, string):
-        self.log_string += string + "\n"
-        print(string)
+    def print(self, string, verbose_only=False):
+        if verbose_only and not self.verbose:
+            return
+        else:
+            self.log_string += string + "\n"
+            print(string)
     def get_log_dump(self):
         return self.log_string
 
@@ -957,13 +963,16 @@ def main_prog():
                     "sync_data folder without prompting.", action="store_true")
     parser.add_argument("-p", "--plot", help="Plot data before and after "
                                             "processing.", action="store_true")
+    parser.add_argument("-v", "--verbose", help="Include additional output for "
+                                            "diagnosis.", action="store_true")
     parser.add_argument("-d", "--desc", help="Specify a description string to "
         "append to output file names - data and plot files (if -p also used)",
                                                         type=str, default="")
+
     # https://www.programcreek.com/python/example/748/argparse.ArgumentParser
     args = parser.parse_args()
 
-    AllRuns = RunGroup(args.auto)
+    AllRuns = RunGroup(args.auto, args.verbose)
 
     if args.plot and PLOT_LIB_PRESENT:
         AllRuns.plot_runs(args.over, args.desc)
