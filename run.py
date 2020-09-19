@@ -1,3 +1,4 @@
+print("Importing modules...")
 import os           # Used for analyzing file paths and directories
 import csv          # Needed to read in and write out data
 import argparse     # Used to parse optional command-line arguments
@@ -5,6 +6,7 @@ import math         # Using pi to convert linear speed to angular speed.
 import pandas as pd # Series and DataFrame structures
 import numpy as np
 import traceback
+import time
 from datetime import datetime
 import getpass
 
@@ -17,6 +19,7 @@ try:
 except ImportError:
     PLOT_LIB_PRESENT = False
 # https://stackoverflow.com/questions/3496592/conditional-import-of-modules-in-python
+print("...done\n")
 
 
 # global constancts
@@ -50,19 +53,15 @@ class DataReadError(Exception):
 class DataSyncError(Exception):
     pass
 
-class TimeStampError(Exception):
-    pass
-
 class DataTrimError(Exception):
     pass
 
-class CVTCalcError(Exception):
-    pass
 
 class RunGroup(object):
     """Represents a collection of runs from the raw_data directory."""
-    def __init__(self, process_all=False):
+    def __init__(self, process_all=False, verbose=False):
         # create SingleRun object for each run but don't read in data yet.
+        self.verbosity = verbose
         self.build_run_dict()
         self.process_runs(process_all)
 
@@ -76,21 +75,42 @@ class RunGroup(object):
             if os.path.isdir(os.path.join(RAW_INCA_ROOT, file)):
                 continue # ignore any directories found
 
-            if "decel" in file.lower():
+            if "decel" in file.lower() or "deccel" in file.lower():
                 # ThisRun = self.create_downhill_run(file)
-                input("Skipping file %s because program can't process decel "
+                input("Skipping file '%s' because program can't process decel "
                 "runs yet.\nPress Enter to acknowledge." % file)
+                print("\n")
                 continue
             else:
-                ThisRun = self.create_ss_run(file)
+                # ThisRun = self.create_ss_run(file)
+                try:
+                    ThisRun = self.create_ss_run(file)
+                except FilenameError as exception_text:
+                    print(exception_text)
+                    # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
+                    input("\nRun creation failed with file '%s'.\n"
+                          "Press Enter to skip this run." % (file))
+                    print("\n")
+                    continue # Don't add to run dict
 
+            if ThisRun.get_run_label() in self.run_dict:
+                # catch duplicate run nums.
+                input("\nMore than one run '%s' found in %s:\n"
+                    "\t'%s'\n"
+                    "\t'%s'\n"
+                    "First one will be kept.\nPress Enter to acknowledge."
+                    % (ThisRun.get_run_label(), RAW_INCA_ROOT,
+                     self.run_dict[ThisRun.get_run_label()].get_inca_filename(),
+                     file))
+                print("\n")
+                continue
             self.run_dict[ThisRun.get_run_label()] = ThisRun
 
     def create_ss_run(self, filename):
-        return SSRun(os.path.join(RAW_INCA_ROOT, filename))
+        return SSRun(os.path.join(RAW_INCA_ROOT, filename), self.verbosity)
 
     def create_downhill_run(self, filename):
-        return DownhillRun(os.path.join(RAW_INCA_ROOT, filename))
+        return DownhillRun(os.path.join(RAW_INCA_ROOT, filename), self.verbosity)
 
     def process_runs(self, process_all=False):
         if process_all:
@@ -101,18 +121,19 @@ class RunGroup(object):
             OnlyRun = self.prompt_for_run()
             self.runs_to_process = {OnlyRun.get_run_label(): OnlyRun}
 
+        bad_runs = []
         for run_num in self.runs_to_process:
             RunObj = self.runs_to_process[run_num]
-            bad_runs = []
             try:
                 RunObj.process_data()
             except Exception:
                 exception_trace = traceback.format_exc()
                 # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
                 out_file = log_exception(exception_trace, RunObj.get_output())
-                input("\nProcessing failed on run %s.\nOutput and exception "
-                    "trace written to %s on Desktop.\n"
+                input("\nProcessing failed on run '%s'.\nOutput and exception "
+                    "trace written to '%s' on Desktop.\n"
                     "Press Enter to skip this run." % (run_num, out_file))
+                print("\n")
                 # Stage for removal from run dict.
                 bad_runs.append(run_num)
                 continue
@@ -124,18 +145,21 @@ class RunGroup(object):
 
     def plot_runs(self, overwrite=False, desc_str=None):
         # If only one run in group is to be processed, this will only loop once.
+        if not self.runs_to_process:
+            print("\nNo valid runs to plot.\n")
+            return
+        bad_runs = []
         for run_num in self.runs_to_process:
-            bad_runs = []
+            RunObj = self.runs_to_process[run_num]
             try:
-                RunObj = self.runs_to_process[run_num]
                 RunObj.plot_data(overwrite, desc_str)
             except Exception:
                 exception_trace = traceback.format_exc()
                 # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
                 out_file = log_exception(exception_trace, RunObj.get_output())
-                input("\nPlotting failed on run %s.\nOutput and exception "
-                    "trace written to %s on Desktop.\n"
-                    "Press Enter to skip this run." % (run_num, out_file))
+                input("\nPlotting failed on run '%s'.\nOutput and exception "
+                  "trace written to '%s' on Desktop.\n"
+                     "Press Enter to skip this run." % (run_num, out_file))
                 # Stage for removal from run dict.
                 bad_runs.append(run_num)
                 continue
@@ -145,20 +169,22 @@ class RunGroup(object):
                 # in later calls.
                 self.runs_to_process.pop(bad_run)
 
-
     def export_runs(self, overwrite=False, desc_str=None):
         # If only one run in group is to be processed, this will only loop once.
+        if not self.runs_to_process:
+            print("\nNo valid runs to export.\n")
+            return
+        bad_runs = []
         for run_num in self.runs_to_process:
-            bad_runs = []
+            RunObj = self.runs_to_process[run_num]
             try:
-                RunObj = self.runs_to_process[run_num]
                 RunObj.export_data(overwrite, desc_str)
             except Exception:
                 exception_trace = traceback.format_exc()
                 # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
                 out_file = log_exception(exception_trace, RunObj.get_output())
-                input("\nExporting failed on run %s.\nOutput and exception "
-                    "trace written to %s on Desktop.\n"
+                input("\nExporting failed on run '%s'.\nOutput and exception "
+                    "trace written to '%s' on Desktop.\n"
                     "Press Enter to skip this run." % (run_num, out_file))
                 # Stage for removal from run dict.
                 bad_runs.append(run_num)
@@ -181,7 +207,7 @@ class RunGroup(object):
         if TargetRun:
             return TargetRun
         else:
-            print("No INCA file found matching that run.")
+            print("No valid INCA file found matching that run.")
             return self.prompt_for_run()
 
 
@@ -189,11 +215,28 @@ class SingleRun(object):
     """Represents a single run from the raw_data directory.
     No data is read in until read_data() called.
     """
-    def __init__(self, INCA_path):
-        self.Doc = Output() # Create a new object to store and print output info
+    def __init__(self, INCA_path, verbose=False):
+        # Create a new object to store and print output info
+        self.Doc = Output(verbose)
         self.INCA_path = INCA_path
         self.INCA_filename = os.path.basename(self.INCA_path)
-        self.run_label = self.INCA_filename.split("_")[1][0:4]
+        self.parse_run_num()
+
+    def parse_run_num(self):
+        try:
+            self.run_label = self.INCA_filename.split("_")[1][0:4]
+        except IndexError:
+            raise FilenameError("INCA filename '%s' not in correct format.\n"
+            "Expected format is "
+            "'[pretext]_[four-digit run num][anything else]'.\nNeed the four "
+            "characters that follow the first underscore to be run num."
+                                                        % self.INCA_filename)
+        if any(not char.isdigit() for char in self.run_label):
+            raise FilenameError("INCA filename '%s' not in correct format.\n"
+            "Expected format is "
+            "'[pretext]_[four-digit run num][anything else]'.\nNeed the four "
+            "characters that follow the first underscore to be run num."
+                                                        % self.INCA_filename)
 
         # Metadata string to document in outuput file
         self.meta_str = "INCA_file: '%s' | " % self.INCA_filename
@@ -215,11 +258,22 @@ class SingleRun(object):
                 continue # ignore any directories found
             # Split the extension off the file name, then isolate the final two
             # numbers off the date
-            run_num_i = os.path.splitext(eDAQ_run)[0].split("_")[1][0:2]
+            try:
+                run_num_i = os.path.splitext(eDAQ_run)[0].split("_")[1][0:2]
+            except IndexError:
+                raise FilenameError("eDAQ filename '%s' not in correct format.\n"
+                "Expected format is "
+                "'[pretext]_[two-digit file num][anything else]'.\nNeed the two "
+                "characters that follow the first underscore to be file num.\n"
+                "This will cause problems with successive runs until you fix"
+                "the filename or remove the offending file from %s."
+                                                    % (eDAQ_run, RAW_EDAQ_ROOT))
             if run_num_i == eDAQ_file_num:
                 # break out of loop while "eDAQ_run" is set to correct filename
                 found_eDAQ = True
                 break
+                # There is no checking for multiple eDAQ files with same run
+                # num. The first one found will be used.
         if found_eDAQ:
             self.eDAQ_path = os.path.join(RAW_EDAQ_ROOT, eDAQ_run)
             # Document in metadata string for later file output.
@@ -252,14 +306,15 @@ class SingleRun(object):
                     for n, channel in enumerate(INCA_CHANNELS):
                         raw_inca_dict[channel].append(float(INCA_row[n]))
 
-        # Separate out time. Round to nearest hundredth.
-        inca_time_series = raw_inca_dict["time"].copy()
-        # self.Doc.print(inca_time_series[:20])
-        del raw_inca_dict["time"]
-
+        # Convert the dict to a pandas DataFrame for easier manipulation
+        # and analysis
         self.raw_inca_df = pd.DataFrame(data=raw_inca_dict,
-                                                        index=inca_time_series)
+                                                    index=raw_inca_dict["time"])
+        self.raw_inca_df.rename(columns = {"time": "raw_inca_time"}, inplace=True)
+        # https://datatofish.com/rename-columns-pandas-dataframe/
         self.Doc.print("...done")
+        self.Doc.print("\nraw_inca_df after reading in data:", True)
+        self.Doc.print(self.raw_inca_df.to_string(max_rows=10, show_dimensions=True), True)
 
         # now read eDAQ data
         with open(self.eDAQ_path, "r") as edaq_ascii_file:
@@ -305,53 +360,59 @@ class SingleRun(object):
                         raw_edaq_dict[channel].append(
                                         float(eDAQ_row[edaq_run_start_col+n]))
 
-        # Separate out time
-        edaq_time_series = raw_edaq_dict["time"].copy()
-        # self.Doc.print(edaq_time_series[:20])
-        del raw_edaq_dict["time"]
-
-        # self.Doc.print(edaq_time_series[:10])
-        # self.Doc.print(raw_edaq_dict["gnd_speed"][:10])
-        # self.Doc.print(raw_edaq_dict["pedal_sw"][:10])
-
+        # Convert the dict to a pandas DataFrame for easier manipulation
+        # and analysis
         self.raw_edaq_df = pd.DataFrame(data=raw_edaq_dict,
-                                                        index=edaq_time_series)
+                                                    index=raw_edaq_dict["time"])
+        self.raw_edaq_df.rename(columns = {"time": "raw_edaq_time"}, inplace=True)
+
         self.Doc.print("...done")
+        self.Doc.print("raw_edaq_df after reading in data:", True)
+        self.Doc.print(self.raw_edaq_df.to_string(max_rows=10, show_dimensions=True), True)
 
     def sync_data(self):
-        self.inca_df = self.raw_inca_df.copy(deep=True)
-        self.edaq_df = self.raw_edaq_df.copy(deep=True)
-        # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.copy.html
-
-        # Offset time series to start at zero.
-        self.shift_time_series(self.inca_df, zero=True)
-        self.shift_time_series(self.edaq_df, zero=True)
+        # Create copies of the raw dfs to modify and merge.
+        inca_df = self.raw_inca_df.copy(deep=True)
+        edaq_df = self.raw_edaq_df.copy(deep=True)
 
         # Convert index from seconds to hundredths of a second
-        self.inca_df.set_index(pd.Index([int(round(ti * SAMPLING_FREQ))
-                                for ti in self.inca_df.index]), inplace=True)
-        self.edaq_df.set_index(pd.Index([int(round(ti * SAMPLING_FREQ))
-                                for ti in self.edaq_df.index]), inplace=True)
+        # It's simple for eDAQ data.
+        edaq_df.set_index(pd.Index([int(round(ti * SAMPLING_FREQ))
+                                        for ti in edaq_df.index]), inplace=True)
         # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.set_index.html
+        # Offset time series to start at zero.
+        self.shift_time_series(edaq_df, zero=True)
+
+        # INCA time increments are slightly off, so error accumulates and
+        # can eventually cause issues.
+        # Convert INCA to deltas by subtracting each time value from previous
+        # one, rounding the delta and adding to the previous (rounded) value.
+        # Calculate the rolling difference (delta) between each pair of vals.
+        deltas = inca_df["raw_inca_time"].diff()
+        # https://stackoverflow.com/questions/13114512/calculating-difference-between-two-rows-in-python-pandas
+        deltas[0] = 0 # first val was NaN
+        # Round the series then do a cumulative summation:
+        deltas = pd.Series([round(ti * SAMPLING_FREQ) for ti in deltas])
+        rolling_delt_times = deltas.cumsum()
+        # Assign as the index now (converting to int)
+        inca_df.set_index(pd.Index(rolling_delt_times.astype(int)), inplace=True)
 
         # Check if any pedal events exist
-        if self.inca_df.loc[self.inca_df["pedal_sw"] == 1].empty:
+        if inca_df.loc[inca_df["pedal_sw"] == 1].empty:
             raise DataSyncError("No pedal event found in INCA data (looking for"
             " value of 1 in pedal switch column). Check input pedal data and "
             "ordering of input file's columns.")
-        if self.edaq_df.loc[self.edaq_df["pedal_sw"] == 1].empty:
+        if edaq_df.loc[edaq_df["pedal_sw"] == 1].empty:
             raise DataSyncError("No pedal event found in eDAQ data (looking for"
             " value of 1 in pedal switch column). Check input pedal data and "
             "ordering of input file's columns.")
         # find first pedal switch event
         # https://stackoverflow.com/questions/16683701/in-pandas-how-to-get-the-index-of-a-known-value
-        inca_high_start_t = self.inca_df.loc[
-                                        self.inca_df["pedal_sw"] == 1].index[0]
-        edaq_high_start_t = self.edaq_df.loc[
-                                        self.edaq_df["pedal_sw"] == 1].index[0]
-        self.Doc.print("Start times (inca, edaq): %.2fs, %.2fs"
-                                        % (inca_high_start_t / SAMPLING_FREQ,
-                                           edaq_high_start_t / SAMPLING_FREQ))
+        inca_high_start_t = inca_df.loc[inca_df["pedal_sw"] == 1].index[0]
+        edaq_high_start_t = edaq_df.loc[edaq_df["pedal_sw"] == 1].index[0]
+        self.Doc.print("\nStart times (inca, edaq): %.2fs, %.2fs"
+                                    % (inca_high_start_t / SAMPLING_FREQ,
+                                       edaq_high_start_t / SAMPLING_FREQ), True)
 
         # Test first to see if either data set has first pedal event earlier
         # than 1s. If so, that's the new time for both files to line up at.
@@ -364,24 +425,22 @@ class SingleRun(object):
         inca_target_t = inca_high_start_t - start_buffer
         edaq_target_t = edaq_high_start_t - start_buffer
 
-        self.shift_time_series(self.inca_df, offset_val=-inca_target_t)
-        self.shift_time_series(self.edaq_df, offset_val=-edaq_target_t)
-        # self.Doc.print("new inca index start: %d" % self.inca_df.index[0])
-        # self.Doc.print("new edaq index start: %d" % self.edaq_df.index[0])
+        self.shift_time_series(inca_df, offset_val=-inca_target_t)
+        self.shift_time_series(edaq_df, offset_val=-edaq_target_t)
+        # self.Doc.print("new inca index start: %d" % inca_df.index[0])
+        # self.Doc.print("new edaq index start: %d" % edaq_df.index[0])
 
         # Unify datasets into one DataFrame
         # Slice out values before t=0 (1s before first pedal press)
         # Automatically truncates longer data set
         # The only channel in eDAQ that's valuable, and unique is gnd_speed.
-        self.sync_df = pd.merge(self.inca_df.loc[0:],
-                                self.edaq_df["gnd_speed"].loc[0:],
-                                left_index=True, right_index=True)
 
-        # self.Doc.print(len(self.inca_df))
-        # self.Doc.print(len(self.inca_df.loc[0:]))
-        # self.Doc.print(len(self.edaq_df))
-        # self.Doc.print(len(self.edaq_df.loc[0:]))
-        # input(len(self.sync_df))
+        self.sync_df = pd.merge(inca_df.loc[0:],
+        edaq_df.loc[0:, edaq_df.columns.isin(["raw_edaq_time", "gnd_speed"])],
+                                        left_index=True, right_index=True)
+
+        self.Doc.print("\nsync_df at end of sync:", True)
+        self.Doc.print(self.sync_df.to_string(max_rows=10, show_dimensions=True), True)
 
     def shift_time_series(self, df, zero=False, offset_val=None):
         """If offset_val param specified, add this signed value to all time
@@ -479,16 +538,19 @@ class SingleRun(object):
         plt.clf()
 
     def export_data(self, overwrite=False, description=None):
+        export_df = self.sync_df.drop(columns=["raw_inca_time", "raw_edaq_time"])
+        # https://stackoverflow.com/questions/29763620/how-to-select-all-columns-except-one-column-in-pandas
+
         # Create to list of lists for easier writing out
         # Convert time values from hundredths of a second to seconds
         time_series = [round(ti/SAMPLING_FREQ,2)
-                                    for ti in self.sync_df.index.tolist()]
+                                    for ti in export_df.index.tolist()]
 
         # # Replace any NaNs with blanks
-        self.sync_df.fillna("", inplace=True)
+        export_df.fillna("", inplace=True)
         # https://stackoverflow.com/questions/26837998/pandas-replace-nan-with-blank-empty-string
 
-        sync_array = self.sync_df.values.tolist()
+        sync_array = export_df.values.tolist()
         # https://stackoverflow.com/questions/28006793/pandas-dataframe-to-list-of-lists
 
         # for line_no, inca_line in enumerate(sync_array):
@@ -498,7 +560,7 @@ class SingleRun(object):
             # https://stackoverflow.com/questions/8537916/whats-the-idiomatic-syntax-for-prepending-to-a-short-python-list
 
         # Format header rows
-        channel_list = ["time"] + self.sync_df.columns.tolist()
+        channel_list = ["time"] + export_df.columns.tolist()
         header_rows = [channel_list, [CHANNEL_UNITS[c] for c in channel_list]]
 
         # Add headers to array
@@ -536,6 +598,9 @@ class SingleRun(object):
 
     def get_run_label(self):
         return self.run_label
+
+    def get_inca_filename(self):
+        return self.INCA_filename
 
     def get_meta_str(self):
         return self.meta_str[:-3]
@@ -588,7 +653,7 @@ class SSRun(SingleRun):
             # Main loop evaluates pedal-down event. Stores event start and end
             # times if inner loop finds throttle was >45deg for >2s during event
 
-            if self.sync_df["pedal_sw"][ti]:
+            if self.sync_df["pedal_sw"][ti] == 1:
                 if not pedal_down:
                     self.Doc.print("\tPedal actuated at time\t\t%0.2fs" %
                                                         (ti / SAMPLING_FREQ))
@@ -712,6 +777,8 @@ class SSRun(SingleRun):
         # Now re-assemble the DataFrame with only valid events.
         # https://pandas.pydata.org/pandas-docs/stable/user_guide/merging.html
         self.sync_df = pd.concat(valid_events)
+        self.Doc.print("\nsync_df after abridgement:", True)
+        self.Doc.print(self.sync_df.to_string(max_rows=10, show_dimensions=True), True)
 
         self.Doc.print("\nData time span: %.2f -> %.2f (%d data points)" %
                (self.sync_df.index[0]/SAMPLING_FREQ,
@@ -924,23 +991,30 @@ def log_exception(excp_str, Out):
     onedrive = [folder for folder in home_contents if "OneDrive -" in folder][0]
     desktop_path = "/mnt/c/Users/%s/%s/Desktop" % (username, onedrive)
 
+    # Wait one second to prevent overwriting previous error if it occurred less
+    # than one second ago.
     timestamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
     # https://stackoverflow.com/questions/415511/how-to-get-the-current-time-in-python
     filename = timestamp + "_CVT_data_processing_error.txt"
 
+    print(excp_str)
+    time.sleep(1)
     with open(os.path.join(desktop_path, filename), "w") as log_file:
         log_file.write(Out.get_log_dump() + excp_str)
 
-    print(excp_str)
     return filename
 
 
 class Output(object):
-    def __init__(self):
+    def __init__(self, verbose):
+        self.verbose = verbose
         self.log_string = ""
-    def print(self, string):
-        self.log_string += string + "\n"
-        print(string)
+    def print(self, string, verbose_only=False):
+        if verbose_only and not self.verbose:
+            return
+        else:
+            self.log_string += string + "\n"
+            print(string)
     def get_log_dump(self):
         return self.log_string
 
@@ -962,13 +1036,16 @@ def main_prog():
                     "sync_data folder without prompting.", action="store_true")
     parser.add_argument("-p", "--plot", help="Plot data before and after "
                                             "processing.", action="store_true")
+    parser.add_argument("-v", "--verbose", help="Include additional output for "
+                                            "diagnosis.", action="store_true")
     parser.add_argument("-d", "--desc", help="Specify a description string to "
         "append to output file names - data and plot files (if -p also used)",
                                                         type=str, default="")
+
     # https://www.programcreek.com/python/example/748/argparse.ArgumentParser
     args = parser.parse_args()
 
-    AllRuns = RunGroup(args.auto)
+    AllRuns = RunGroup(args.auto, args.verbose)
 
     if args.plot and PLOT_LIB_PRESENT:
         AllRuns.plot_runs(args.over, args.desc)
