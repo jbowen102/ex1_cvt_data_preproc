@@ -497,26 +497,53 @@ class SingleRun(object):
         self.plot_abridge_compare(overwrite, description)
 
     def plot_abridge_compare(self, overwrite=False, description=None):
-        # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
         ax1 = plt.subplot(211)
-        plt.plot(self.raw_inca_df.index, self.raw_inca_df["throttle"],
-                                                        label="Throttle (og)")
+        # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
+        color = "tab:blue"
+        ax1.plot(self.raw_inca_df.index, self.raw_inca_df["throttle"],
+                                            color=color, label="Throttle (og)")
         plt.title("Throttle vs. Time (Run %s)" % self.run_label)
-        plt.ylabel("Throttle (deg)")
-        plt.legend(loc="best")
-        plt.setp(ax1.get_xticklabels(), visible=False)
+        ax1.set_ylim([-20, 80]) # scale down pedal switch
+        ax1.set_yticks([0, 20, 40, 60, 80])
+        ax1.set_ylabel("Throttle (deg)", color=color)
+        ax1.tick_params(axis="y", labelcolor=color)
 
-        ax2 = plt.subplot(212, sharex=ax1, sharey=ax1)
+        ax2 = ax1.twinx() # second plot on same x axis
+        # https://matplotlib.org/gallery/api/two_scales.html
+        color = "tab:red"
+        ax2.plot(self.raw_inca_df.index, self.raw_inca_df["pedal_sw"],
+                                        color=color, label="Pedal Switch (og)")
+        ax2.set_ylim([-.25, 8]) # scale down pedal switch
+        ax2.set_yticks([0, 1])
+        ax2.set_ylabel("Pedal Switch", color=color)
+        ax2.tick_params(axis="y", labelcolor=color)
+        plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
+
+
+        ax3 = plt.subplot(212, sharex=ax1, sharey=ax1)
+        color = "tab:blue"
         # Convert DF indices from hundredths of a second to seconds
         sync_time_series = [round(ti/SAMPLING_FREQ, 2)
                                                 for ti in self.sync_df.index]
-        plt.plot(sync_time_series, self.sync_df["throttle"],
+        ax3.plot(sync_time_series, self.sync_df["throttle"],
                                                     label="Throttle (synced)")
+        plt.xlabel("Time (s)")
         # https://matplotlib.org/3.2.1/gallery/subplots_axes_and_figures/shared_axis_demo.html#sphx-glr-gallery-subplots-axes-and-figures-shared-axis-demo-py
 
-        plt.xlabel("Time (s)")
-        plt.ylabel("Throttle (deg)")
-        plt.legend(loc="best")
+        ax3.set_ylim([-20, 80]) # scale down pedal switch
+        ax3.set_yticks([0, 20, 40, 60, 80])
+        ax3.set_ylabel("Throttle (deg)", color=color)
+        ax3.tick_params(axis="y", labelcolor=color)
+
+        ax4 = ax3.twinx() # second plot on same x axis
+        # https://matplotlib.org/gallery/api/two_scales.html
+        color = "tab:red"
+        ax4.plot(sync_time_series, self.sync_df["pedal_sw"],
+                                    color=color, label="Pedal Switch (synced)")
+        ax4.set_ylim([-.25, 8]) # scale down pedal switch
+        ax4.set_yticks([0, 1])
+        ax4.set_ylabel("Pedal Switch", color=color)
+        ax4.tick_params(axis="y", labelcolor=color)
 
         if description:
             fig_filepath = "./figs/%s_abr-%s.png" % (self.run_label, description)
@@ -842,13 +869,6 @@ class SSRun(SingleRun):
         self.Doc.print("...done")
 
         # Apply speed and speed slope criteria to isolate steady-state events.
-        # Use compound OR statement to generate a mask.
-        # criteria_mask = (  (self.math_df["gs_rolling_avg"] < GSPD_CR)
-        #                  | (self.math_df["gs_rolling_slope"] > GS_SLOPE_CR)
-        #                  | (self.math_df["gs_rolling_slope"] < -GS_SLOPE_CR)
-        #                  | (self.math_df["es_rolling_avg"] < ESPD_CR)
-        #                  | (self.math_df["es_rolling_slope"] > ES_SLOPE_CR)
-        #                  | (self.math_df["es_rolling_slope"] < -ES_SLOPE_CR) )
         ss_filter = (      (self.math_df["gs_rolling_avg"] > GSPD_CR)
                          & (self.math_df["gs_rolling_slope"] < GS_SLOPE_CR)
                          & (self.math_df["gs_rolling_slope"] > -GS_SLOPE_CR)
@@ -887,15 +907,9 @@ class SSRun(SingleRun):
         self.math_df["SS_gnd_spd_avg"] = np.nan
         self.math_df.at[0, "SS_gnd_spd_avg"] = np.mean(
                                                 self.math_df["gs_rol_avg_mskd"])
-        # self.math_df["SS_gnd_spd_slope_avg"] = np.nan
-        # self.math_df["SS_gnd_spd_slope_avg"][0] = np.mean(
-        #                                        self.math_df["gs_rolling_slope"])
         self.math_df["SS_eng_spd_avg"] = np.nan
         self.math_df.at[0, "SS_eng_spd_avg"] = np.mean(
                                                 self.math_df["es_rol_avg_mskd"])
-        # self.math_df["SS_eng_spd_slope_avg"] = np.nan
-        # self.math_df["SS_eng_spd_slope_avg"][0] = np.mean(
-        #                                        self.math_df["es_rolling_slope"])
         self.math_df["SS_cvt_ratio_avg"] = np.nan
         self.math_df.at[0, "SS_cvt_ratio_avg"] = np.mean(
                                                    self.math_df["cvt_ratio_mskd"])
@@ -913,7 +927,6 @@ class SSRun(SingleRun):
         self.Doc.print("\nsync_df after adding steady-state data:", True)
         self.Doc.print(self.sync_df.to_string(max_rows=10, max_cols=7,
                                                     show_dimensions=True), True)
-
 
         # pandas rolling(), apply(), regression references:
         # https://stackoverflow.com/questions/47390467/pandas-dataframe-rolling-with-two-columns-and-two-rows
