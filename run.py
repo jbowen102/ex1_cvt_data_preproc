@@ -261,12 +261,12 @@ class SingleRun(object):
             try:
                 run_num_i = os.path.splitext(eDAQ_run)[0].split("_")[1][0:2]
             except IndexError:
-                raise FilenameError("eDAQ filename '%s' not in correct format.\n"
-                "Expected format is "
-                "'[pretext]_[two-digit file num][anything else]'.\nNeed the two "
-                "characters that follow the first underscore to be file num.\n"
-                "This will cause problems with successive runs until you fix"
-                "the filename or remove the offending file from %s."
+                raise FilenameError("eDAQ filename '%s' not in correct format."
+                "\nExpected format is "
+                "'[pretext]_[two-digit file num][anything else]'.\nNeed the "
+                "two characters that follow the first underscore to be file "
+                "num.\nThis will cause problems with successive runs until you "
+                "fix the filename or remove the offending file from %s."
                                                     % (eDAQ_run, RAW_EDAQ_ROOT))
             if run_num_i == eDAQ_file_num:
                 # break out of loop while "eDAQ_run" is set to correct filename
@@ -368,7 +368,7 @@ class SingleRun(object):
         self.raw_edaq_df.rename(columns = {"time": "raw_edaq_time"}, inplace=True)
 
         self.Doc.print("...done")
-        self.Doc.print("raw_edaq_df after reading in data:", True)
+        self.Doc.print("\nraw_edaq_df after reading in data:", True)
         self.Doc.print(self.raw_edaq_df.to_string(max_rows=10, max_cols=7,
                                                     show_dimensions=True), True)
 
@@ -420,7 +420,7 @@ class SingleRun(object):
         # than 1s. If so, that's the new time for both files to line up at.
         start_buffer = min([1 * SAMPLING_FREQ, inca_high_start_t,
                                                             edaq_high_start_t])
-        # self.Doc.print("start buffer: %f" % start_buffer)
+        # self.Doc.print("start buffer: %f" % start_buffer, True)
 
         # shift time values, leaving negative values in early part of file that
         # will be trimmed off below.
@@ -429,17 +429,29 @@ class SingleRun(object):
 
         self.shift_time_series(inca_df, offset_val=-inca_target_t)
         self.shift_time_series(edaq_df, offset_val=-edaq_target_t)
-        # self.Doc.print("new inca index start: %d" % inca_df.index[0])
-        # self.Doc.print("new edaq index start: %d" % edaq_df.index[0])
+        # self.Doc.print("new inca index start: %d" % inca_df.index[0], True)
+        # self.Doc.print("new edaq index start: %d" % edaq_df.index[0], True)
 
+        # self.sync_df = pd.merge(inca_df.loc[0:],
+        # edaq_df.loc[0:, edaq_df.columns.isin(["raw_edaq_time", "gnd_speed"])],
+        #                                 left_index=True, right_index=True)
+        # self.Doc.print("\nsync_df at end of sync (old way):", True)
+        # self.Doc.print(self.sync_df.to_string(max_rows=10, max_cols=7,
+        #                                             show_dimensions=True), True)
+        #
         # Unify datasets into one DataFrame
         # Slice out values before t=0 (1s before first pedal press)
-        # Automatically truncates longer data set
-        # The only channel in eDAQ that's valuable, and unique is gnd_speed.
+        # Truncate file with extra time vals at end. Will not happen during
+        # join() because of the "outer" option creating union to catch any
+        # time gaps in either dataset (have only seen it in one INCA run so far).
+        end_time = min(inca_df.index[-1], edaq_df.index[-1])
 
-        self.sync_df = pd.merge(inca_df.loc[0:],
-        edaq_df.loc[0:, edaq_df.columns.isin(["raw_edaq_time", "gnd_speed"])],
-                                        left_index=True, right_index=True)
+        # The only channel in eDAQ that's valuable and unique is gnd_speed.
+        # Also carry over raw time for debugging purposes.
+        self.sync_df = inca_df.loc[0:end_time].join(
+                                edaq_df.loc[0:end_time, edaq_df.columns.isin(
+                                            ["raw_edaq_time", "gnd_speed"])],
+                                                                    how="outer")
 
         self.Doc.print("\nsync_df at end of sync:", True)
         self.Doc.print(self.sync_df.to_string(max_rows=10, max_cols=7,
@@ -518,7 +530,6 @@ class SingleRun(object):
         ax2.set_ylabel("Pedal Switch", color=color)
         ax2.tick_params(axis="y", labelcolor=color)
         plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
-
 
         ax3 = plt.subplot(212, sharex=ax1, sharey=ax1)
         color = "tab:blue"
