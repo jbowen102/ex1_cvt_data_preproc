@@ -314,7 +314,8 @@ class SingleRun(object):
         # https://datatofish.com/rename-columns-pandas-dataframe/
         self.Doc.print("...done")
         self.Doc.print("\nraw_inca_df after reading in data:", True)
-        self.Doc.print(self.raw_inca_df.to_string(max_rows=10, show_dimensions=True), True)
+        self.Doc.print(self.raw_inca_df.to_string(max_rows=10, max_cols=7,
+                                                show_dimensions=True), True)
 
         # now read eDAQ data
         with open(self.eDAQ_path, "r") as edaq_ascii_file:
@@ -368,7 +369,8 @@ class SingleRun(object):
 
         self.Doc.print("...done")
         self.Doc.print("raw_edaq_df after reading in data:", True)
-        self.Doc.print(self.raw_edaq_df.to_string(max_rows=10, show_dimensions=True), True)
+        self.Doc.print(self.raw_edaq_df.to_string(max_rows=10, max_cols=7,
+                                                    show_dimensions=True), True)
 
     def sync_data(self):
         # Create copies of the raw dfs to modify and merge.
@@ -440,7 +442,8 @@ class SingleRun(object):
                                         left_index=True, right_index=True)
 
         self.Doc.print("\nsync_df at end of sync:", True)
-        self.Doc.print(self.sync_df.to_string(max_rows=10, show_dimensions=True), True)
+        self.Doc.print(self.sync_df.to_string(max_rows=10, max_cols=7,
+                                                    show_dimensions=True), True)
 
     def shift_time_series(self, df, zero=False, offset_val=None):
         """If offset_val param specified, add this signed value to all time
@@ -778,7 +781,8 @@ class SSRun(SingleRun):
         # https://pandas.pydata.org/pandas-docs/stable/user_guide/merging.html
         self.sync_df = pd.concat(valid_events)
         self.Doc.print("\nsync_df after abridgement:", True)
-        self.Doc.print(self.sync_df.to_string(max_rows=10, show_dimensions=True), True)
+        self.Doc.print(self.sync_df.to_string(max_rows=10, max_cols=7,
+                                                    show_dimensions=True), True)
 
         self.Doc.print("\nData time span: %.2f -> %.2f (%d data points)" %
                (self.sync_df.index[0]/SAMPLING_FREQ,
@@ -836,49 +840,66 @@ class SSRun(SingleRun):
                     window=WIN_SIZE_SLOPE, center=True).apply(
                         lambda x: np.polyfit(x.index/SAMPLING_FREQ, x, 1)[0])
         self.Doc.print("...done")
-        # No need to run rolling avg or slope on cvt_ratio since we aren't
-        # applying criteria to it for purpose of determining steady state.
-        self.math_df["filtered_cvt"] = self.math_df["cvt_ratio"].copy(deep=True)
 
         # Apply speed and speed slope criteria to isolate steady-state events.
         # Use compound OR statement to generate a mask.
-        criteria_mask = (  (self.math_df["gs_rolling_avg"] < GSPD_CR)
-                         | (self.math_df["gs_rolling_slope"] > GS_SLOPE_CR)
-                         | (self.math_df["gs_rolling_slope"] < -GS_SLOPE_CR)
-                         | (self.math_df["es_rolling_avg"] < ESPD_CR)
-                         | (self.math_df["es_rolling_slope"] > ES_SLOPE_CR)
-                         | (self.math_df["es_rolling_slope"] < -ES_SLOPE_CR) )
+        # criteria_mask = (  (self.math_df["gs_rolling_avg"] < GSPD_CR)
+        #                  | (self.math_df["gs_rolling_slope"] > GS_SLOPE_CR)
+        #                  | (self.math_df["gs_rolling_slope"] < -GS_SLOPE_CR)
+        #                  | (self.math_df["es_rolling_avg"] < ESPD_CR)
+        #                  | (self.math_df["es_rolling_slope"] > ES_SLOPE_CR)
+        #                  | (self.math_df["es_rolling_slope"] < -ES_SLOPE_CR) )
+        ss_filter = (      (self.math_df["gs_rolling_avg"] > GSPD_CR)
+                         & (self.math_df["gs_rolling_slope"] < GS_SLOPE_CR)
+                         & (self.math_df["gs_rolling_slope"] > -GS_SLOPE_CR)
+                         & (self.math_df["es_rolling_avg"] > ESPD_CR)
+                         & (self.math_df["es_rolling_slope"] < ES_SLOPE_CR)
+                         & (self.math_df["es_rolling_slope"] > -ES_SLOPE_CR) )
         # GS_SLOPE_CR and ES_SLOPE_CR are abs value so have to apply on high
         # and low end.
+        self.Doc.print("\nTotal data points that fail steady-state criteria: %d"
+                                                        % sum(~ss_filter), True)
+        self.Doc.print("Total data points that meet steady-state criteria: %d"
+                                                         % sum(ss_filter), True)
+        # https://stackoverflow.com/questions/12765833/counting-the-number-of-true-booleans-in-a-python-list
+
+        self.math_df["steady_state"] = ss_filter
 
         # "Mask off" by assigning NaN where criteria not met.
         self.math_df["gs_rol_avg_mskd"] = self.math_df["gs_rolling_avg"].mask(
-                                                                criteria_mask)
+                                                                    ~ss_filter)
         self.math_df["es_rol_avg_mskd"] = self.math_df["es_rolling_avg"].mask(
-                                                                criteria_mask)
-        self.math_df["filtered_cvt"].mask(criteria_mask, inplace=True)
+                                                                    ~ss_filter)
         # Masking these too to calculate avg slope off SS region later:
-        self.math_df["gs_rolling_slope"].mask(criteria_mask, inplace=True)
-        self.math_df["es_rolling_slope"].mask(criteria_mask, inplace=True)
+        self.math_df["gs_rslope_mskd"] = self.math_df["gs_rolling_slope"].mask(
+                                                                    ~ss_filter)
+        self.math_df["es_rslope_mskd"] = self.math_df["es_rolling_slope"].mask(
+                                                                    ~ss_filter)
         # https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#indexing-where-mask
+
+        # No need to run rolling avg or slope on cvt_ratio since we aren't
+        # applying criteria to it for purpose of determining steady state.
+        self.math_df["cvt_ratio_mskd"] = self.math_df["cvt_ratio"].mask(
+                                                                ~ss_filter)
 
         # Calculate overall (aggregate) mean of each filtereed/masked channel
         # Prefill with NaN and assign mean to first element
         self.math_df["SS_gnd_spd_avg"] = np.nan
-        self.math_df["SS_gnd_spd_avg"][0] = np.mean(
+        self.math_df.at[0, "SS_gnd_spd_avg"] = np.mean(
                                                 self.math_df["gs_rol_avg_mskd"])
-        self.math_df["SS_gnd_spd_slope_avg"] = np.nan
-        self.math_df["SS_gnd_spd_slope_avg"][0] = np.mean(
-                                               self.math_df["gs_rolling_slope"])
+        # self.math_df["SS_gnd_spd_slope_avg"] = np.nan
+        # self.math_df["SS_gnd_spd_slope_avg"][0] = np.mean(
+        #                                        self.math_df["gs_rolling_slope"])
         self.math_df["SS_eng_spd_avg"] = np.nan
-        self.math_df["SS_eng_spd_avg"][0] = np.mean(
+        self.math_df.at[0, "SS_eng_spd_avg"] = np.mean(
                                                 self.math_df["es_rol_avg_mskd"])
-        self.math_df["SS_eng_spd_slope_avg"] = np.nan
-        self.math_df["SS_eng_spd_slope_avg"][0] = np.mean(
-                                               self.math_df["es_rolling_slope"])
+        # self.math_df["SS_eng_spd_slope_avg"] = np.nan
+        # self.math_df["SS_eng_spd_slope_avg"][0] = np.mean(
+        #                                        self.math_df["es_rolling_slope"])
         self.math_df["SS_cvt_ratio_avg"] = np.nan
-        self.math_df["SS_cvt_ratio_avg"][0] = np.mean(
-                                                   self.math_df["filtered_cvt"])
+        self.math_df.at[0, "SS_cvt_ratio_avg"] = np.mean(
+                                                   self.math_df["cvt_ratio_mskd"])
+        # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.at.html
 
         # Transcribe to main DF for export
         # Leave out average SS slopes.
@@ -888,6 +909,11 @@ class SSRun(SingleRun):
         CHANNEL_UNITS["SS_gnd_spd_avg_calc"] = CHANNEL_UNITS["gnd_speed"]
         CHANNEL_UNITS["SS_eng_spd_avg_calc"] = CHANNEL_UNITS["engine_spd"]
         CHANNEL_UNITS["SS_cvt_ratio_avg_calc"] = CHANNEL_UNITS["CVT_ratio_calc"]
+
+        self.Doc.print("\nsync_df after adding steady-state data:", True)
+        self.Doc.print(self.sync_df.to_string(max_rows=10, max_cols=7,
+                                                    show_dimensions=True), True)
+
 
         # pandas rolling(), apply(), regression references:
         # https://stackoverflow.com/questions/47390467/pandas-dataframe-rolling-with-two-columns-and-two-rows
