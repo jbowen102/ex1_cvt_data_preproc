@@ -432,13 +432,6 @@ class SingleRun(object):
         # self.Doc.print("new inca index start: %d" % inca_df.index[0], True)
         # self.Doc.print("new edaq index start: %d" % edaq_df.index[0], True)
 
-        # self.sync_df = pd.merge(inca_df.loc[0:],
-        # edaq_df.loc[0:, edaq_df.columns.isin(["raw_edaq_time", "gnd_speed"])],
-        #                                 left_index=True, right_index=True)
-        # self.Doc.print("\nsync_df at end of sync (old way):", True)
-        # self.Doc.print(self.sync_df.to_string(max_rows=10, max_cols=7,
-        #                                             show_dimensions=True), True)
-        #
         # Unify datasets into one DataFrame
         # Slice out values before t=0 (1s before first pedal press)
         # Truncate file with extra time vals at end. Will not happen during
@@ -452,7 +445,7 @@ class SingleRun(object):
                                 edaq_df.loc[0:end_time, edaq_df.columns.isin(
                                             ["raw_edaq_time", "gnd_speed"])],
                                                                     how="outer")
-
+        # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.join.html#pandas.DataFrame.join
         self.Doc.print("\nsync_df at end of sync:", True)
         self.Doc.print(self.sync_df.to_string(max_rows=10, max_cols=7,
                                                     show_dimensions=True), True)
@@ -472,6 +465,69 @@ class SingleRun(object):
 
         # Maybe could use df.shift() here instead.
         # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.shift.html
+
+    def knit_pedal_gaps(self):
+        """Finds any gaps in INCA pedal channel and fills them if pedal signal
+        is high before and after gap. Prevents false-negative in abridge
+        algo."""
+        na_times = self.sync_df["pedal_sw"][self.sync_df["pedal_sw"].isna()]
+
+        if len(na_times) == 0:
+            self.Doc.print("\nNo missing INCA times found.")
+            return
+        else:
+            self.Doc.print("\nMissing INCA times (len: %d):" % len(na_times), True)
+            self.Doc.print(na_times.to_string(max_rows=10), True)
+
+        # Filter trivial case of gap length 1 to avoid IndexError below.
+        if len(na_times) == 1:
+            # set variables used in reassignment loop below
+            gap_ranges = [na_times.index[0], na_times.index[0]]
+        elif len(na_times) > 1:
+            # Step through na_times and identify any discontinuities, indicating
+            # multiple gaps in the data.
+            gap_ranges = []
+            current_range = [na_times.index[0]]
+            for i, time in enumerate(na_times.index[1:]):
+                prev_time = na_times.index[i] # i is behind by one.
+                if time - prev_time > 1:
+                    current_range.append(prev_time)
+                    gap_ranges.append(current_range)
+                    # Reset range
+                    current_range = [time]
+            # Add last value to end of last range
+            current_range.append(time)
+            gap_ranges.append(current_range)
+
+        self.Doc.print("\nContinuous INCA sample gaps: ")
+        for range in gap_ranges:
+            self.Doc.print("\t" + " ->\t".join(str(t) for t in range))
+        # https://stackoverflow.com/questions/973568/convert-nested-lists-to-string
+
+        for range in gap_ranges:
+            # Find time values before and after gap
+            pre_time_i = self.sync_df.index.get_loc(range[0]) - 1
+            post_time_i = self.sync_df.index.get_loc(range[-1]) + 1
+            pre_time = self.sync_df.index[pre_time_i]
+            post_time = self.sync_df.index[post_time_i]
+            # https://stackoverflow.com/questions/28837633/pandas-get-position-of-a-given-index-in-dataframe
+            knit = False
+            if (self.sync_df.at[pre_time, "pedal_sw"]
+                                 and self.sync_df.at[post_time, "pedal_sw"]):
+                # Only need to knit gap if pedal was actuated before gap and
+                # still actuated after. Assume no interruption during gap.
+                self.Doc.print("\nKnitting pedal event in gap %d -> %d"
+                                                        % (range[0], range[-1]))
+
+                self.sync_df.at[range[0]:range[1]+1, "pedal_sw"] = 1
+                knit = True
+
+                self.Doc.print("\nsync_df after knitting pedal event:", True)
+                self.Doc.print(self.sync_df[range[0]-2:range[1]+3].to_string(
+                        max_rows=10, max_cols=7, show_dimensions=True), True)
+
+            if not knit:
+                self.Doc.print("\nNo pedal events to knit.")
 
     def abridge_data(self):
         # Implemented in child classes
@@ -676,6 +732,12 @@ class SSRun(SingleRun):
         # Define constants used to isolating valid events.
         self.THRTL_THRESH = 45 # degrees ("throttle threshold")
         self.THRTL_T_THRESH = 2 # seconds ("throttle time threshold")
+
+        # Need to repair any gaps in INCA samples. If pedal was actuated
+        # when sampling cut out, and it was still actuated when the sampling
+        # resumed, the abridge_data() algorithmm will treat that as a pedal lift
+        # when it likely wasn't.
+        self.knit_pedal_gaps()
 
         # list of start and end times for pedal-down events with a segment of >45deg
         # throttle for >2s.
@@ -924,6 +986,7 @@ class SSRun(SingleRun):
         self.math_df["SS_cvt_ratio_avg"] = np.nan
         self.math_df.at[0, "SS_cvt_ratio_avg"] = np.mean(
                                                    self.math_df["cvt_ratio_mskd"])
+        # https://stackoverflow.com/questions/13842088/set-value-for-particular-cell-in-pandas-dataframe-using-index
         # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.at.html
 
         # Transcribe to main DF for export
