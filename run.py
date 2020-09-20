@@ -310,8 +310,8 @@ class SingleRun(object):
         # and analysis
         self.raw_inca_df = pd.DataFrame(data=raw_inca_dict,
                                                     index=raw_inca_dict["time"])
-        self.raw_inca_df.rename(columns = {"time": "raw_inca_time"}, inplace=True)
         # https://datatofish.com/rename-columns-pandas-dataframe/
+
         self.Doc.print("...done")
         self.Doc.print("\nraw_inca_df after reading in data:", True)
         self.Doc.print(self.raw_inca_df.to_string(max_rows=10, max_cols=7,
@@ -365,7 +365,6 @@ class SingleRun(object):
         # and analysis
         self.raw_edaq_df = pd.DataFrame(data=raw_edaq_dict,
                                                     index=raw_edaq_dict["time"])
-        self.raw_edaq_df.rename(columns = {"time": "raw_edaq_time"}, inplace=True)
 
         self.Doc.print("...done")
         self.Doc.print("\nraw_edaq_df after reading in data:", True)
@@ -390,7 +389,7 @@ class SingleRun(object):
         # Convert INCA to deltas by subtracting each time value from previous
         # one, rounding the delta and adding to the previous (rounded) value.
         # Calculate the rolling difference (delta) between each pair of vals.
-        deltas = inca_df["raw_inca_time"].diff()
+        deltas = inca_df["time"].diff()
         # https://stackoverflow.com/questions/13114512/calculating-difference-between-two-rows-in-python-pandas
         deltas[0] = 0 # first val was NaN
         # Round the series then do a cumulative summation:
@@ -441,10 +440,12 @@ class SingleRun(object):
 
         # The only channel in eDAQ that's valuable and unique is gnd_speed.
         # Also carry over raw time for debugging purposes.
+        # The suffix options keep the two DFs' time columns from conflicting.
         self.sync_df = inca_df.loc[0:end_time].join(
-                                edaq_df.loc[0:end_time, edaq_df.columns.isin(
-                                            ["raw_edaq_time", "gnd_speed"])],
-                                                                    how="outer")
+                               edaq_df.loc[0:end_time, edaq_df.columns.isin(
+                                                    ["time", "gnd_speed"])],
+                         lsuffix="_raw_inca", rsuffix="_raw_edaq", how="outer")
+
         # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.join.html#pandas.DataFrame.join
         self.Doc.print("\nsync_df at end of sync:", True)
         self.Doc.print(self.sync_df.to_string(max_rows=10, max_cols=7,
@@ -635,7 +636,7 @@ class SingleRun(object):
         plt.clf()
 
     def export_data(self, overwrite=False, description=None):
-        export_df = self.sync_df.drop(columns=["raw_inca_time", "raw_edaq_time"])
+        export_df = self.sync_df.drop(columns=["time_raw_inca", "time_raw_edaq"])
         # https://stackoverflow.com/questions/29763620/how-to-select-all-columns-except-one-column-in-pandas
 
         # Create to list of lists for easier writing out
