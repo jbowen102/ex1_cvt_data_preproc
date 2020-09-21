@@ -432,7 +432,8 @@ class SingleRun(object):
         # than 1s. If so, that's the new time for both files to line up at.
         start_buffer = min([1 * SAMPLING_FREQ, inca_high_start_t,
                                                             edaq_high_start_t])
-        # self.Doc.print("start buffer: %f" % start_buffer, True)
+        self.Doc.print("Start buffer: %0.2fs"
+                                           % (start_buffer/SAMPLING_FREQ), True)
 
         # shift time values, leaving negative values in early part of file that
         # will be trimmed off below.
@@ -441,8 +442,10 @@ class SingleRun(object):
 
         self.shift_time_series(inca_df, offset_val=-inca_target_t)
         self.shift_time_series(edaq_df, offset_val=-edaq_target_t)
-        # self.Doc.print("new inca index start: %d" % inca_df.index[0], True)
-        # self.Doc.print("new edaq index start: %d" % edaq_df.index[0], True)
+        self.Doc.print("First INCA sample shifted to time %0.2fs"
+                                    % (inca_df.index[0]/SAMPLING_FREQ), True)
+        self.Doc.print("First eDAQ sample shifted to time %0.2fs"
+                                    % (edaq_df.index[0]/SAMPLING_FREQ), True)
 
         # Unify datasets into one DataFrame
         # Slice out values before t=0 (1s before first pedal press)
@@ -812,8 +815,8 @@ class SSRun(SingleRun):
                 # Check if event is valid in case switch goes low before
                 # throttle angle drops below its threshold.
                 if counting:
-                    self.Doc.print("\t\tPedal lifted before throttle dropped "
-                                          "below %d deg." % self.THRTL_THRESH)
+                    self.Doc.print("\t(Pedal lifted before throttle dropped "
+                                          "below %d deg.)" % self.THRTL_THRESH)
                     # similar to above code:
                     high_throttle_time[1] = self.sync_df.index[i-1] # prev. time
                     delta = high_throttle_time[1] - high_throttle_time[0]
@@ -835,6 +838,25 @@ class SSRun(SingleRun):
             else:
                 # pedal is not currently down, and wasn't just lifted.
                 pass
+
+        # One last check in case pedal-down event was ongoing when file ended.
+        if counting:
+            self.Doc.print("\t(File ended before throttle dropped "
+                                  "below %d deg.)" % self.THRTL_THRESH)
+            # similar to above code:
+            high_throttle_time[1] = self.sync_df.index[i-1] # prev. time
+            delta = high_throttle_time[1] - high_throttle_time[0]
+            self.Doc.print("\t\tThrottle >%d deg total t:\t%0.2fs" %
+                             (self.THRTL_THRESH, delta / SAMPLING_FREQ))
+            if (high_throttle_time[1] - high_throttle_time[0] >
+                                  self.THRTL_T_THRESH * SAMPLING_FREQ):
+                keep = True
+            counting = False # reset indicator
+            high_throttle_time = [0, 0] # reset
+        self.Doc.print("\tFile ended at time\t\t%0.2fs\n"
+                                                % (ti/SAMPLING_FREQ))
+        if keep:
+            valid_event_times.append( [ped_buffer[0], ped_buffer[-1]] )
 
         self.Doc.print("\nValid steady-state ranges:")
         for event_time in valid_event_times:
