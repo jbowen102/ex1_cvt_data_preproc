@@ -812,8 +812,13 @@ class SSRun(SingleRun):
                % (event_time[0] / SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
 
         if not valid_event_times:
-            # If no times were stored, then something might be wrong.
-            raise DataTrimError("No valid pedal-down events found.")
+            # If no times were stored, then alert user but continue with
+            # program.
+            input("\nNo valid pedal-down events found (Criteria: throttle >%d "
+            "deg for >%ds total).\nPress Enter to acknowledge and continue "
+            "processing data without abridging."
+                                % (self.THRTL_THRESH, self.THRTL_T_THRESH))
+            return
 
         # make sure if two >45 deg events (w/ pedal lift between) are closer
         # than 5s, don't cut into either one. Look at each pair of end/start
