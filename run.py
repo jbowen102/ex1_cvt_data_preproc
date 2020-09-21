@@ -22,8 +22,10 @@ print("...done\n")
 
 
 # global constancts
-RAW_INCA_ROOT = "./raw_data/INCA"
-RAW_EDAQ_ROOT = "./raw_data/eDAQ"
+RAW_INCA_DIR = "./raw_data/INCA"
+RAW_EDAQ_DIR = "./raw_data/eDAQ"
+SYNC_DIR = "./sync_data"
+PLOT_DIR = "./figs"
 
 INCA_CHANNELS = ["time", "pedal_sw", "engine_spd", "throttle"]
 EDAQ_CHANNELS = ["time", "pedal_v", "gnd_speed", "pedal_sw"]
@@ -66,14 +68,17 @@ class RunGroup(object):
 
     def build_run_dict(self):
         """Create dictionary with an entry for each INCA run in raw_data dir."""
-        INCA_files = os.listdir(RAW_INCA_ROOT)
+        if not os.path.exists(RAW_INCA_DIR):
+            raise DataReadError("No raw INCA directory found. Put data in this "
+                                                "folder: %s" % RAW_INCA_DIR)
+        INCA_files = os.listdir(RAW_INCA_DIR)
         INCA_files.sort()
         self.run_dict = {}
         # eliminate any directories that might be in the list
 
         decel_runs = []
         for i, file in enumerate(INCA_files):
-            if os.path.isdir(os.path.join(RAW_INCA_ROOT, file)):
+            if os.path.isdir(os.path.join(RAW_INCA_DIR, file)):
                 continue # ignore any directories found
 
             if "decel" in file.lower() or "deccel" in file.lower():
@@ -98,7 +103,7 @@ class RunGroup(object):
                     "\t'%s'\n"
                     "\t'%s'\n"
                     "First one will be kept.\nPress Enter to acknowledge."
-                    % (ThisRun.get_run_label(), RAW_INCA_ROOT,
+                    % (ThisRun.get_run_label(), RAW_INCA_DIR,
                      self.run_dict[ThisRun.get_run_label()].get_inca_filename(),
                      file))
                 print("\n")
@@ -112,10 +117,10 @@ class RunGroup(object):
             input("Press Enter to acknowledge.")
 
     def create_ss_run(self, filename):
-        return SSRun(os.path.join(RAW_INCA_ROOT, filename), self.verbosity)
+        return SSRun(os.path.join(RAW_INCA_DIR, filename), self.verbosity)
 
     def create_downhill_run(self, filename):
-        return DownhillRun(os.path.join(RAW_INCA_ROOT, filename), self.verbosity)
+        return DownhillRun(os.path.join(RAW_INCA_DIR, filename), self.verbosity)
 
     def process_runs(self, process_all=False):
         if process_all:
@@ -256,10 +261,13 @@ class SingleRun(object):
         """Locate path to eDAQ file corresponding to INCA run num."""
         eDAQ_file_num = self.run_label[0:2]
 
-        all_eDAQ_runs = os.listdir(RAW_EDAQ_ROOT)
+        if not os.path.exists(RAW_EDAQ_DIR):
+            raise DataReadError("No raw eDAQ directory found. Put data in this"
+                                                "folder: %s" % RAW_EDAQ_DIR)
+        all_eDAQ_runs = os.listdir(RAW_EDAQ_DIR)
         found_eDAQ = False # initialize to false. Will change if file is found.
         for eDAQ_run in all_eDAQ_runs:
-            if os.path.isdir(os.path.join(RAW_EDAQ_ROOT, eDAQ_run)):
+            if os.path.isdir(os.path.join(RAW_EDAQ_DIR, eDAQ_run)):
                 continue # ignore any directories found
             # Split the extension off the file name, then isolate the final two
             # numbers off the date
@@ -272,7 +280,7 @@ class SingleRun(object):
                 "two characters that follow the first underscore to be file "
                 "num.\nThis will cause problems with successive runs until you "
                 "fix the filename or remove the offending file from %s."
-                                                    % (eDAQ_run, RAW_EDAQ_ROOT))
+                                                    % (eDAQ_run, RAW_EDAQ_DIR))
             if run_num_i == eDAQ_file_num:
                 # break out of loop while "eDAQ_run" is set to correct filename
                 found_eDAQ = True
@@ -280,7 +288,7 @@ class SingleRun(object):
                 # There is no checking for multiple eDAQ files with same run
                 # num. The first one found will be used.
         if found_eDAQ:
-            self.eDAQ_path = os.path.join(RAW_EDAQ_ROOT, eDAQ_run)
+            self.eDAQ_path = os.path.join(RAW_EDAQ_DIR, eDAQ_run)
             # Document in metadata string for later file output.
             self.meta_str += "eDAQ file: '%s' | " % eDAQ_run
         else:
@@ -619,9 +627,10 @@ class SingleRun(object):
         ax4.tick_params(axis="y", labelcolor=color)
 
         if description:
-            fig_filepath = "./figs/%s_abr-%s.png" % (self.run_label, description)
+            fig_filepath = ("%s/%s_abr-%s.png"
+                                    % (PLOT_DIR, self.run_label, description))
         else:
-            fig_filepath = "./figs/%s_abr.png" % self.run_label
+            fig_filepath = "%s/%s_abr.png" % (PLOT_DIR, self.run_label)
 
         if os.path.exists(fig_filepath) and not overwrite:
             ow_answer = ""
@@ -678,7 +687,7 @@ class SingleRun(object):
         else:
             sync_basename = "%s_Sync.csv" % self.run_label
 
-        sync_filename = "./sync_data/%s" % sync_basename
+        sync_filename = "%s/%s" % (SYNC_DIR, sync_basename)
 
         # Check if file exists already. Prompt user for overwrite decision.
         if os.path.exists(sync_filename) and not overwrite:
@@ -819,10 +828,10 @@ class SSRun(SingleRun):
         if not valid_event_times:
             # If no times were stored, then alert user but continue with
             # program.
-            input("\nNo valid pedal-down events found (Criteria: throttle >%d "
-            "deg for >%ds total).\nPress Enter to acknowledge and continue "
+            input("\nNo valid pedal-down events found in run %s (Criterion: "
+            "throttle >%d deg for >%ds total).\nPress Enter to acknowledge and continue "
             "processing data without abridging."
-                                % (self.THRTL_THRESH, self.THRTL_T_THRESH))
+                    % (self.run_label, self.THRTL_THRESH, self.THRTL_T_THRESH))
             return
 
         # make sure if two >45 deg events (w/ pedal lift between) are closer
@@ -1069,9 +1078,10 @@ class SSRun(SingleRun):
         plt.legend(loc="best")
 
         if description:
-            fig_filepath = "./figs/%s_ss-%s.png" % (self.run_label, description)
+            fig_filepath = ("%s/%s_ss-%s.png"
+                                    % (PLOT_DIR, self.run_label, description))
         else:
-            fig_filepath = "./figs/%s_ss.png" % self.run_label
+            fig_filepath = "%s/%s_ss.png" % (PLOT_DIR, self.run_label)
 
         if os.path.exists(fig_filepath) and not overwrite:
             ow_answer = ""
@@ -1082,9 +1092,9 @@ class SSRun(SingleRun):
                 plt.clf()
                 return
 
-        print("\nExporting plot as %s..." % fig_filepath)
+        self.Doc.print("\nExporting plot as %s..." % fig_filepath)
         plt.savefig(fig_filepath)
-        print("...done")
+        self.Doc.print("...done")
         # plt.show() # can't use w/ WSL.
         # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
         # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
@@ -1172,9 +1182,16 @@ def main_prog():
     AllRuns = RunGroup(args.auto, args.verbose)
 
     if args.plot and PLOT_LIB_PRESENT:
+        if not os.path.exists(PLOT_DIR):
+            # Create folder for output plots if it doesn't exist already.
+            os.mkdir(PLOT_DIR)
         AllRuns.plot_runs(args.over, args.desc)
     elif args.plot:
         print("\nFailed to import matplotlib. Cannot plot data.")
+
+    if not os.path.exists(SYNC_DIR):
+        # Create folder for output data if it doesn't exist already.
+        os.mkdir(SYNC_DIR)
 
     AllRuns.export_runs(args.over, args.desc)
 
