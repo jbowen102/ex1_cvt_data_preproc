@@ -2,7 +2,6 @@ print("Importing modules...")
 import os           # Used for analyzing file paths and directories
 import csv          # Needed to read in and write out data
 import argparse     # Used to parse optional command-line arguments
-import math         # Using pi to convert linear speed to angular speed.
 import pandas as pd # Series and DataFrame structures
 import numpy as np
 import traceback
@@ -71,15 +70,15 @@ class RunGroup(object):
         INCA_files.sort()
         self.run_dict = {}
         # eliminate any directories that might be in the list
+
+        decel_runs = []
         for i, file in enumerate(INCA_files):
             if os.path.isdir(os.path.join(RAW_INCA_ROOT, file)):
                 continue # ignore any directories found
 
             if "decel" in file.lower() or "deccel" in file.lower():
                 # ThisRun = self.create_downhill_run(file)
-                input("Skipping file '%s' because program can't process decel "
-                "runs yet.\nPress Enter to acknowledge." % file)
-                print("\n")
+                decel_runs.append(file)
                 continue
             else:
                 # ThisRun = self.create_ss_run(file)
@@ -105,6 +104,12 @@ class RunGroup(object):
                 print("\n")
                 continue
             self.run_dict[ThisRun.get_run_label()] = ThisRun
+        if decel_runs:
+            print("Skipping these files because program can't process decel "
+                                                                "runs yet:")
+            for run in decel_runs:
+                print("\t%s" % run)
+            input("Press Enter to acknowledge.")
 
     def create_ss_run(self, filename):
         return SSRun(os.path.join(RAW_INCA_ROOT, filename), self.verbosity)
@@ -542,7 +547,7 @@ class SingleRun(object):
     def add_cvt_ratio(self):
         ROLLING_RADIUS_FACTOR = 0.965
         TIRE_DIAM_IN = 18 # inches
-        tire_circ = math.pi * TIRE_DIAM_IN * ROLLING_RADIUS_FACTOR # inches
+        tire_circ = np.pi * TIRE_DIAM_IN * ROLLING_RADIUS_FACTOR # inches
 
         AXLE_RATIO = 11.47
         GEARBOX_RATIO = 1.95
