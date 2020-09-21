@@ -808,9 +808,25 @@ class SSRun(SingleRun):
                     counting = False # reset indicator
                     high_throttle_time = [0, 0] # reset
 
-            elif pedal_down:
-                # pedal just lifted
-                self.Doc.print("\tPedal lifted at time\t\t%0.2fs\n" % (ti/SAMPLING_FREQ))
+            elif pedal_down: # pedal just lifted
+                # Check if event is valid in case switch goes low before
+                # throttle angle drops below its threshold.
+                if counting:
+                    self.Doc.print("\t\tPedal lifted before throttle dropped "
+                                          "below %d deg." % self.THRTL_THRESH)
+                    # similar to above code:
+                    high_throttle_time[1] = self.sync_df.index[i-1] # prev. time
+                    delta = high_throttle_time[1] - high_throttle_time[0]
+                    self.Doc.print("\t\tThrottle >%d deg total t:\t%0.2fs" %
+                                     (self.THRTL_THRESH, delta / SAMPLING_FREQ))
+                    if (high_throttle_time[1] - high_throttle_time[0] >
+                                          self.THRTL_T_THRESH * SAMPLING_FREQ):
+                        keep = True
+                    counting = False # reset indicator
+                    high_throttle_time = [0, 0] # reset
+
+                self.Doc.print("\tPedal lifted at time\t\t%0.2fs\n"
+                                                        % (ti/SAMPLING_FREQ))
                 if keep:
                     valid_event_times.append( [ped_buffer[0], ped_buffer[-1]] )
                 pedal_down = False
