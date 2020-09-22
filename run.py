@@ -867,10 +867,14 @@ class SSRun(SingleRun):
             # If no times were stored, then alert user but continue with
             # program.
             input("\nNo valid pedal-down events found in run %s (Criterion: "
-            "throttle >%d deg for >%ds total).\nPress Enter to acknowledge and continue "
-            "processing data without abridging."
+            "throttle >%d deg for >%ds total).\nPress Enter to acknowledge and "
+            "continue processing data without abridging."
                     % (self.run_label, self.THRTL_THRESH, self.THRTL_T_THRESH))
             return
+        else:
+            # Document in output file
+            self.meta_str += ("Removed pedal events where throttle didn't exceed "
+                "%d deg for >%ds | " % (self.THRTL_THRESH, self.THRTL_T_THRESH))
 
         # make sure if two >45 deg events (w/ pedal lift between) are closer
         # than 5s, don't cut into either one. Look at each pair of end/start
@@ -878,10 +882,10 @@ class SSRun(SingleRun):
         previous_pair = valid_event_times[0]
         valid_event_times_c = valid_event_times.copy()
         for n, pair in enumerate(valid_event_times[1:]):
-            # self.Doc.print("\t%f - %f" % (pair[0], previous_pair[1]))
+            # self.Doc.print("\t%f - %f" % (pair[0], previous_pair[1]), True)
             if pair[0] - previous_pair[1] < (5 * SAMPLING_FREQ):
                 # Replace the two pairs with a single combined pair
-                del valid_event_times_c[n-1]
+                del valid_event_times_c[n] # n is already behind by one pos.
                 valid_event_times_c[n] = [ previous_pair[0], pair[1] ]
             previous_pair = pair
         self.Doc.print("\nAfter any merges:")
