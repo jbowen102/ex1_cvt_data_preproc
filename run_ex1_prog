@@ -10,10 +10,36 @@ else
 fi
 
 
-# Make sure local data folders are empty
+# Define path variables
 LOCAL_RAW="$HOME/ex1_cvt_data_preproc/raw_data"
 LOCAL_SYNC="$HOME/ex1_cvt_data_preproc/sync_data"
+LOCAL_FIG="$HOME/ex1_cvt_data_preproc/figs"
 
+
+# Create raw_data folders if they doesn't exist already
+if [ -d "$LOCAL_RAW" ];
+then
+	: # do nothing
+else
+	mkdir "$LOCAL_RAW"
+fi
+
+if [ -d "$LOCAL_RAW/INCA/" ];
+then
+	: # do nothing
+else
+	mkdir "$LOCAL_RAW/INCA/"
+fi
+
+if [ -d "$LOCAL_RAW/eDAQ/" ];
+then
+	: # do nothing
+else
+	mkdir "$LOCAL_RAW/eDAQ/"
+fi
+
+
+# Make sure local data folders are empty
 if [ "$(ls -A ${LOCAL_RAW}/INCA/)" ]
 then
 	rm ${LOCAL_RAW}/INCA/*
@@ -24,7 +50,7 @@ then
 	rm ${LOCAL_RAW}/eDAQ/*
 fi
 
-if [ "$(ls -A ${LOCAL_SYNC}/)" ]
+if [ -d ${LOCAL_SYNC} ] && [ "$(ls -A ${LOCAL_SYNC}/)" ]
 then
 	rm ${LOCAL_SYNC}/*
 fi
@@ -57,7 +83,7 @@ fi
 cd ~/ex1_cvt_data_preproc # Need to be in the project dir for the Python script to run its main function.
 
 printf "Starting Python script:\n"
-python3 run.py --auto --over
+python3 run.py --auto --over --plot
 PYTHON_RETURN=$? # gets return value of last command executed.
 printf "Finished Python script.\n"
 
@@ -84,8 +110,9 @@ then
 	fi
 fi
 
-printf "\nCopying data back to P: drive SYNCED_DATA folder...\n"
+printf "\nCopying output data and plots to P: drive SYNCED_DATA folder...\n"
 cp ${LOCAL_SYNC}/* "${REMOTE_SYNC}"
+cp ${LOCAL_FIG}/* "${REMOTE_SYNC}"
 
 
 

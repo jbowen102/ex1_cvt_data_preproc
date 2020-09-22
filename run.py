@@ -2,7 +2,6 @@ print("Importing modules...")
 import os           # Used for analyzing file paths and directories
 import csv          # Needed to read in and write out data
 import argparse     # Used to parse optional command-line arguments
-import math         # Using pi to convert linear speed to angular speed.
 import pandas as pd # Series and DataFrame structures
 import numpy as np
 import traceback
@@ -23,8 +22,10 @@ print("...done\n")
 
 
 # global constancts
-RAW_INCA_ROOT = "./raw_data/INCA"
-RAW_EDAQ_ROOT = "./raw_data/eDAQ"
+RAW_INCA_DIR = "./raw_data/INCA"
+RAW_EDAQ_DIR = "./raw_data/eDAQ"
+SYNC_DIR = "./sync_data"
+PLOT_DIR = "./figs"
 
 INCA_CHANNELS = ["time", "pedal_sw", "engine_spd", "throttle"]
 EDAQ_CHANNELS = ["time", "pedal_v", "gnd_speed", "pedal_sw"]
@@ -67,19 +68,22 @@ class RunGroup(object):
 
     def build_run_dict(self):
         """Create dictionary with an entry for each INCA run in raw_data dir."""
-        INCA_files = os.listdir(RAW_INCA_ROOT)
+        if not os.path.exists(RAW_INCA_DIR):
+            raise DataReadError("No raw INCA directory found. Put data in this "
+                                                "folder: %s" % RAW_INCA_DIR)
+        INCA_files = os.listdir(RAW_INCA_DIR)
         INCA_files.sort()
         self.run_dict = {}
         # eliminate any directories that might be in the list
+
+        decel_runs = []
         for i, file in enumerate(INCA_files):
-            if os.path.isdir(os.path.join(RAW_INCA_ROOT, file)):
+            if os.path.isdir(os.path.join(RAW_INCA_DIR, file)):
                 continue # ignore any directories found
 
             if "decel" in file.lower() or "deccel" in file.lower():
                 # ThisRun = self.create_downhill_run(file)
-                input("Skipping file '%s' because program can't process decel "
-                "runs yet.\nPress Enter to acknowledge." % file)
-                print("\n")
+                decel_runs.append(file)
                 continue
             else:
                 # ThisRun = self.create_ss_run(file)
@@ -99,18 +103,24 @@ class RunGroup(object):
                     "\t'%s'\n"
                     "\t'%s'\n"
                     "First one will be kept.\nPress Enter to acknowledge."
-                    % (ThisRun.get_run_label(), RAW_INCA_ROOT,
+                    % (ThisRun.get_run_label(), RAW_INCA_DIR,
                      self.run_dict[ThisRun.get_run_label()].get_inca_filename(),
                      file))
                 print("\n")
                 continue
             self.run_dict[ThisRun.get_run_label()] = ThisRun
+        if decel_runs:
+            print("Skipping these files because program can't process decel "
+                                                                "runs yet:")
+            for run in decel_runs:
+                print("\t%s" % run)
+            input("Press Enter to acknowledge.")
 
     def create_ss_run(self, filename):
-        return SSRun(os.path.join(RAW_INCA_ROOT, filename), self.verbosity)
+        return SSRun(os.path.join(RAW_INCA_DIR, filename), self.verbosity)
 
     def create_downhill_run(self, filename):
-        return DownhillRun(os.path.join(RAW_INCA_ROOT, filename), self.verbosity)
+        return DownhillRun(os.path.join(RAW_INCA_DIR, filename), self.verbosity)
 
     def process_runs(self, process_all=False):
         if process_all:
@@ -251,10 +261,13 @@ class SingleRun(object):
         """Locate path to eDAQ file corresponding to INCA run num."""
         eDAQ_file_num = self.run_label[0:2]
 
-        all_eDAQ_runs = os.listdir(RAW_EDAQ_ROOT)
+        if not os.path.exists(RAW_EDAQ_DIR):
+            raise DataReadError("No raw eDAQ directory found. Put data in this"
+                                                "folder: %s" % RAW_EDAQ_DIR)
+        all_eDAQ_runs = os.listdir(RAW_EDAQ_DIR)
         found_eDAQ = False # initialize to false. Will change if file is found.
         for eDAQ_run in all_eDAQ_runs:
-            if os.path.isdir(os.path.join(RAW_EDAQ_ROOT, eDAQ_run)):
+            if os.path.isdir(os.path.join(RAW_EDAQ_DIR, eDAQ_run)):
                 continue # ignore any directories found
             # Split the extension off the file name, then isolate the final two
             # numbers off the date
@@ -267,7 +280,7 @@ class SingleRun(object):
                 "two characters that follow the first underscore to be file "
                 "num.\nThis will cause problems with successive runs until you "
                 "fix the filename or remove the offending file from %s."
-                                                    % (eDAQ_run, RAW_EDAQ_ROOT))
+                                                    % (eDAQ_run, RAW_EDAQ_DIR))
             if run_num_i == eDAQ_file_num:
                 # break out of loop while "eDAQ_run" is set to correct filename
                 found_eDAQ = True
@@ -275,7 +288,7 @@ class SingleRun(object):
                 # There is no checking for multiple eDAQ files with same run
                 # num. The first one found will be used.
         if found_eDAQ:
-            self.eDAQ_path = os.path.join(RAW_EDAQ_ROOT, eDAQ_run)
+            self.eDAQ_path = os.path.join(RAW_EDAQ_DIR, eDAQ_run)
             # Document in metadata string for later file output.
             self.meta_str += "eDAQ file: '%s' | " % eDAQ_run
         else:
@@ -419,7 +432,8 @@ class SingleRun(object):
         # than 1s. If so, that's the new time for both files to line up at.
         start_buffer = min([1 * SAMPLING_FREQ, inca_high_start_t,
                                                             edaq_high_start_t])
-        # self.Doc.print("start buffer: %f" % start_buffer, True)
+        self.Doc.print("Start buffer: %0.2fs"
+                                           % (start_buffer/SAMPLING_FREQ), True)
 
         # shift time values, leaving negative values in early part of file that
         # will be trimmed off below.
@@ -428,8 +442,10 @@ class SingleRun(object):
 
         self.shift_time_series(inca_df, offset_val=-inca_target_t)
         self.shift_time_series(edaq_df, offset_val=-edaq_target_t)
-        # self.Doc.print("new inca index start: %d" % inca_df.index[0], True)
-        # self.Doc.print("new edaq index start: %d" % edaq_df.index[0], True)
+        self.Doc.print("First INCA sample shifted to time %0.2fs"
+                                    % (inca_df.index[0]/SAMPLING_FREQ), True)
+        self.Doc.print("First eDAQ sample shifted to time %0.2fs"
+                                    % (edaq_df.index[0]/SAMPLING_FREQ), True)
 
         # Unify datasets into one DataFrame
         # Slice out values before t=0 (1s before first pedal press)
@@ -542,7 +558,7 @@ class SingleRun(object):
     def add_cvt_ratio(self):
         ROLLING_RADIUS_FACTOR = 0.965
         TIRE_DIAM_IN = 18 # inches
-        tire_circ = math.pi * TIRE_DIAM_IN * ROLLING_RADIUS_FACTOR # inches
+        tire_circ = np.pi * TIRE_DIAM_IN * ROLLING_RADIUS_FACTOR # inches
 
         AXLE_RATIO = 11.47
         GEARBOX_RATIO = 1.95
@@ -614,9 +630,10 @@ class SingleRun(object):
         ax4.tick_params(axis="y", labelcolor=color)
 
         if description:
-            fig_filepath = "./figs/%s_abr-%s.png" % (self.run_label, description)
+            fig_filepath = ("%s/%s_abr-%s.png"
+                                    % (PLOT_DIR, self.run_label, description))
         else:
-            fig_filepath = "./figs/%s_abr.png" % self.run_label
+            fig_filepath = "%s/%s_abr.png" % (PLOT_DIR, self.run_label)
 
         if os.path.exists(fig_filepath) and not overwrite:
             ow_answer = ""
@@ -673,7 +690,7 @@ class SingleRun(object):
         else:
             sync_basename = "%s_Sync.csv" % self.run_label
 
-        sync_filename = "./sync_data/%s" % sync_basename
+        sync_filename = "%s/%s" % (SYNC_DIR, sync_basename)
 
         # Check if file exists already. Prompt user for overwrite decision.
         if os.path.exists(sync_filename) and not overwrite:
@@ -794,9 +811,25 @@ class SSRun(SingleRun):
                     counting = False # reset indicator
                     high_throttle_time = [0, 0] # reset
 
-            elif pedal_down:
-                # pedal just lifted
-                self.Doc.print("\tPedal lifted at time\t\t%0.2fs\n" % (ti/SAMPLING_FREQ))
+            elif pedal_down: # pedal just lifted
+                # Check if event is valid in case switch goes low before
+                # throttle angle drops below its threshold.
+                if counting:
+                    self.Doc.print("\t(Pedal lifted before throttle dropped "
+                                          "below %d deg.)" % self.THRTL_THRESH)
+                    # similar to above code:
+                    high_throttle_time[1] = self.sync_df.index[i-1] # prev. time
+                    delta = high_throttle_time[1] - high_throttle_time[0]
+                    self.Doc.print("\t\tThrottle >%d deg total t:\t%0.2fs" %
+                                     (self.THRTL_THRESH, delta / SAMPLING_FREQ))
+                    if (high_throttle_time[1] - high_throttle_time[0] >
+                                          self.THRTL_T_THRESH * SAMPLING_FREQ):
+                        keep = True
+                    counting = False # reset indicator
+                    high_throttle_time = [0, 0] # reset
+
+                self.Doc.print("\tPedal lifted at time\t\t%0.2fs\n"
+                                                        % (ti/SAMPLING_FREQ))
                 if keep:
                     valid_event_times.append( [ped_buffer[0], ped_buffer[-1]] )
                 pedal_down = False
@@ -806,14 +839,38 @@ class SSRun(SingleRun):
                 # pedal is not currently down, and wasn't just lifted.
                 pass
 
+        # One last check in case pedal-down event was ongoing when file ended.
+        if counting:
+            self.Doc.print("\t(File ended before throttle dropped "
+                                  "below %d deg.)" % self.THRTL_THRESH)
+            # similar to above code:
+            high_throttle_time[1] = self.sync_df.index[i-1] # prev. time
+            delta = high_throttle_time[1] - high_throttle_time[0]
+            self.Doc.print("\t\tThrottle >%d deg total t:\t%0.2fs" %
+                             (self.THRTL_THRESH, delta / SAMPLING_FREQ))
+            if (high_throttle_time[1] - high_throttle_time[0] >
+                                  self.THRTL_T_THRESH * SAMPLING_FREQ):
+                keep = True
+            counting = False # reset indicator
+            high_throttle_time = [0, 0] # reset
+        self.Doc.print("\tFile ended at time\t\t%0.2fs\n"
+                                                % (ti/SAMPLING_FREQ))
+        if keep:
+            valid_event_times.append( [ped_buffer[0], ped_buffer[-1]] )
+
         self.Doc.print("\nValid steady-state ranges:")
         for event_time in valid_event_times:
             self.Doc.print("\t%0.2f\t->\t%0.2f"
                % (event_time[0] / SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
 
         if not valid_event_times:
-            # If no times were stored, then something might be wrong.
-            raise DataTrimError("No valid pedal-down events found.")
+            # If no times were stored, then alert user but continue with
+            # program.
+            input("\nNo valid pedal-down events found in run %s (Criterion: "
+            "throttle >%d deg for >%ds total).\nPress Enter to acknowledge and continue "
+            "processing data without abridging."
+                    % (self.run_label, self.THRTL_THRESH, self.THRTL_T_THRESH))
+            return
 
         # make sure if two >45 deg events (w/ pedal lift between) are closer
         # than 5s, don't cut into either one. Look at each pair of end/start
@@ -1059,9 +1116,10 @@ class SSRun(SingleRun):
         plt.legend(loc="best")
 
         if description:
-            fig_filepath = "./figs/%s_ss-%s.png" % (self.run_label, description)
+            fig_filepath = ("%s/%s_ss-%s.png"
+                                    % (PLOT_DIR, self.run_label, description))
         else:
-            fig_filepath = "./figs/%s_ss.png" % self.run_label
+            fig_filepath = "%s/%s_ss.png" % (PLOT_DIR, self.run_label)
 
         if os.path.exists(fig_filepath) and not overwrite:
             ow_answer = ""
@@ -1072,9 +1130,9 @@ class SSRun(SingleRun):
                 plt.clf()
                 return
 
-        print("\nExporting plot as %s..." % fig_filepath)
+        self.Doc.print("\nExporting plot as %s..." % fig_filepath)
         plt.savefig(fig_filepath)
-        print("...done")
+        self.Doc.print("...done")
         # plt.show() # can't use w/ WSL.
         # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
         # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
@@ -1162,9 +1220,16 @@ def main_prog():
     AllRuns = RunGroup(args.auto, args.verbose)
 
     if args.plot and PLOT_LIB_PRESENT:
+        if not os.path.exists(PLOT_DIR):
+            # Create folder for output plots if it doesn't exist already.
+            os.mkdir(PLOT_DIR)
         AllRuns.plot_runs(args.over, args.desc)
     elif args.plot:
         print("\nFailed to import matplotlib. Cannot plot data.")
+
+    if not os.path.exists(SYNC_DIR):
+        # Create folder for output data if it doesn't exist already.
+        os.mkdir(SYNC_DIR)
 
     AllRuns.export_runs(args.over, args.desc)
 
