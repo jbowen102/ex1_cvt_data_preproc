@@ -956,12 +956,12 @@ class SSRun(SingleRun):
         self.add_ss_avgs()
 
     def add_ss_avgs(self):
-        WIN_SIZE_AVG = 201  # window size for speed rolling avg.
-        WIN_SIZE_SLOPE = 21 # win size for rolling slope of speed rolling avg.
+        WIN_SIZE_AVG = 51  # window size for speed rolling avg.
+        WIN_SIZE_SLOPE = 301 # win size for rolling slope of speed rolling avg.
 
         GSPD_CR = 2.5     # mph. Ground speed (min) criterion for determining if
                           # steady-state event is moving rather than stationary.
-        GS_SLOPE_CR = 0.125  # mph/s.
+        GS_SLOPE_CR = 0.25  # mph/s.
         # Ground-speed slope (max) criterion to est. steady-state. Abs value
 
         ESPD_CR = 2750    # rpm. Engine speed (min) criterion for determining if
