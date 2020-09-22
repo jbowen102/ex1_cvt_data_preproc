@@ -867,10 +867,14 @@ class SSRun(SingleRun):
             # If no times were stored, then alert user but continue with
             # program.
             input("\nNo valid pedal-down events found in run %s (Criterion: "
-            "throttle >%d deg for >%ds total).\nPress Enter to acknowledge and continue "
-            "processing data without abridging."
+            "throttle >%d deg for >%ds total).\nPress Enter to acknowledge and "
+            "continue processing data without abridging."
                     % (self.run_label, self.THRTL_THRESH, self.THRTL_T_THRESH))
             return
+        else:
+            # Document in output file
+            self.meta_str += ("Removed pedal events where throttle didn't exceed "
+                "%d deg for >%ds | " % (self.THRTL_THRESH, self.THRTL_T_THRESH))
 
         # make sure if two >45 deg events (w/ pedal lift between) are closer
         # than 5s, don't cut into either one. Look at each pair of end/start
