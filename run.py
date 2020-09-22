@@ -878,10 +878,10 @@ class SSRun(SingleRun):
         previous_pair = valid_event_times[0]
         valid_event_times_c = valid_event_times.copy()
         for n, pair in enumerate(valid_event_times[1:]):
-            # self.Doc.print("\t%f - %f" % (pair[0], previous_pair[1]))
+            # self.Doc.print("\t%f - %f" % (pair[0], previous_pair[1]), True)
             if pair[0] - previous_pair[1] < (5 * SAMPLING_FREQ):
                 # Replace the two pairs with a single combined pair
-                del valid_event_times_c[n-1]
+                del valid_event_times_c[n] # n is already behind by one pos.
                 valid_event_times_c[n] = [ previous_pair[0], pair[1] ]
             previous_pair = pair
         self.Doc.print("\nAfter any merges:")
