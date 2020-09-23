@@ -63,7 +63,7 @@ REMOTE_SYNC="/mnt/p/Current Projects/100840 GOAT Engine/Prod Engg/Test_&_Reliab_
 if [ "$(ls -A "${REMOTE_RAW}/INCA/")" ]
 then
 	printf "Copying data from P: drive RAW_DATA_TO_SYNC/INCA folder...\n"
-	cp "${REMOTE_RAW}"/INCA/* ${LOCAL_RAW}/INCA
+	rsync -aziv "${REMOTE_RAW}"/INCA/* ${LOCAL_RAW}/INCA
 else
 	printf "Nothing found in P: drive RAW_DATA_TO_SYNC/INCA/ folder. Exiting.\n"
 	exit 1
@@ -72,7 +72,7 @@ fi
 if [ "$(ls -A "${REMOTE_RAW}/eDAQ/")" ]
 then
 	printf "Copying data from P: drive RAW_DATA_TO_SYNC/eDAQ folder...\n"
-	cp "${REMOTE_RAW}"/eDAQ/* ${LOCAL_RAW}/eDAQ
+	rsync -aziv "${REMOTE_RAW}"/eDAQ/* ${LOCAL_RAW}/eDAQ
 else
 	printf "Nothing found in P: drive RAW_DATA_TO_SYNC/INCA/ folder. Exiting.\n"
 	exit 1
@@ -111,6 +111,8 @@ then
 fi
 
 printf "\nCopying output data and plots to P: drive SYNCED_DATA folder...\n"
+# Can't use rsync because destination drive is NTFS or something that doesn't
+# allow metadata to be modified post-copy like rsync wants to do.
 cp ${LOCAL_SYNC}/* "${REMOTE_SYNC}"
 cp ${LOCAL_FIG}/* "${REMOTE_SYNC}"
 
