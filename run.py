@@ -8,6 +8,9 @@ import traceback
 import time
 from datetime import datetime
 import getpass
+from PIL import Image
+import hashlib
+import glob
 
 try:
     import matplotlib
@@ -629,28 +632,47 @@ class SingleRun(object):
         ax4.set_ylabel("Pedal Switch", color=color)
         ax4.tick_params(axis="y", labelcolor=color)
 
-        if description:
-            fig_filepath = ("%s/%s_abr-%s.png"
-                                    % (PLOT_DIR, self.run_label, description))
-        else:
-            fig_filepath = "%s/%s_abr.png" % (PLOT_DIR, self.run_label)
+        # plt.show() # can't use w/ WSL. Export instead.
+        # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
+        self.export_plot("abr", overwrite, description)
+        plt.clf()
+        # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
 
-        if os.path.exists(fig_filepath) and not overwrite:
+    def export_plot(self, type, overwrite, description):
+        if description:
+            fig_filepath = ("%s/%s_%s-%s.png"
+                                % (PLOT_DIR, self.run_label, type, description))
+        else:
+            fig_filepath = "%s/%s_%s.png" % (PLOT_DIR, self.run_label, type)
+
+        short_hash_len = 6
+        # Check for existing fig with same filename including description but
+        # EXCLUDING hash.
+        wildcard_filename = (os.path.splitext(fig_filepath)[0]
+                            + "-#" + "?"*short_hash_len
+                            + os.path.splitext(fig_filepath)[1])
+        if glob.glob(wildcard_filename) and not overwrite:
             ow_answer = ""
             while ow_answer.lower() not in ["y", "n"]:
                 ow_answer = input("\n%s already exists in figs folder. "
-                        "Overwrite? (Y/N)\n> " % os.path.basename(fig_filepath))
+                                  "Overwrite? (Y/N)\n> "
+                                        % os.path.basename(wildcard_filename))
             if ow_answer.lower() == "n":
-                plt.clf()
+                # plot will be cleared in caller function.
                 return
 
-        self.Doc.print("\nExporting plot as %s..." % fig_filepath)
         plt.savefig(fig_filepath)
-        self.Doc.print("...done")
-        # plt.show() # can't use w/ WSL.
-        # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
-        # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
-        plt.clf()
+        # Calculate unique hash value (like a fingerprint) to output in CSV's
+        # meta_str. Put in img filename too.
+        img_hash = hashlib.sha1(Image.open(fig_filepath).tobytes())
+        # https://stackoverflow.com/questions/24126596/print-md5-hash-of-an-image-opened-with-pythons-pil
+        hash_text = img_hash.hexdigest()[:short_hash_len]
+        fig_filepath_hash = (os.path.splitext(fig_filepath)[0] + "-#"
+                                + hash_text + os.path.splitext(fig_filepath)[1])
+        os.rename(fig_filepath, fig_filepath_hash)
+        self.Doc.print("\nExported plot as %s." % fig_filepath_hash)
+        self.meta_str += ("Corresponding %s fig hash: '%s' | "
+                                                            % (type, hash_text))
 
     def export_data(self, overwrite=False, description=None):
         export_df = self.sync_df.drop(columns=["time_raw_inca", "time_raw_edaq"])
@@ -686,7 +708,7 @@ class SingleRun(object):
         sync_array.insert(0, [self.get_meta_str()])
 
         if description:
-            sync_basename = "%s_Sync_%s.csv" % (self.run_label, description)
+            sync_basename = "%s_Sync-%s.csv" % (self.run_label, description)
         else:
             sync_basename = "%s_Sync.csv" % self.run_label
 
@@ -1119,28 +1141,11 @@ class SSRun(SingleRun):
         plt.ylabel("Throttle (deg)")
         plt.legend(loc="best")
 
-        if description:
-            fig_filepath = ("%s/%s_ss-%s.png"
-                                    % (PLOT_DIR, self.run_label, description))
-        else:
-            fig_filepath = "%s/%s_ss.png" % (PLOT_DIR, self.run_label)
-
-        if os.path.exists(fig_filepath) and not overwrite:
-            ow_answer = ""
-            while ow_answer.lower() not in ["y", "n"]:
-                ow_answer = input("\n%s already exists in figs folder. "
-                        "Overwrite? (Y/N)\n> " % os.path.basename(fig_filepath))
-            if ow_answer.lower() == "n":
-                plt.clf()
-                return
-
-        self.Doc.print("\nExporting plot as %s..." % fig_filepath)
-        plt.savefig(fig_filepath)
-        self.Doc.print("...done")
         # plt.show() # can't use w/ WSL.
         # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
-        # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
+        self.export_plot("ss", overwrite, description)
         plt.clf()
+        # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
 
     def get_run_type(self):
         return "SSRun"
