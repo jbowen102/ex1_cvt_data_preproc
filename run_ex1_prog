@@ -111,12 +111,13 @@ then
 fi
 
 printf "\nCopying output data and plots to P: drive SYNCED_DATA folder...\n"
-# Can't use rsync because destination drive is NTFS or something that doesn't
-# allow metadata to be modified post-copy like rsync wants to do.
-cp ${LOCAL_SYNC}/* "${REMOTE_SYNC}"
-cp ${LOCAL_FIG}/* "${REMOTE_SYNC}"
-
-
+rsync -rhziv --progress ${LOCAL_SYNC}/* "${REMOTE_SYNC}"
+rsync -rhziv --progress ${LOCAL_FIG}/* "${REMOTE_SYNC}"
+# Looks at size and mod time to determine if file needs updating.
+# NTFS mod times not preserved though, so effect is that it will replace any
+# file that's in dest folder with same name.
+# No extraneous files are removed. If dest contains other processed runs not
+# included in the current batch, they'll be left alone.
 
 # References:
 # https://stackoverflow.com/questions/6834487/what-is-the-dollar-question-mark-variable-in-shell-scripting
@@ -124,3 +125,4 @@ cp ${LOCAL_FIG}/* "${REMOTE_SYNC}"
 # https://stackoverflow.com/questions/4181703/how-to-concatenate-string-variables-in-bash
 # https://www.cyberciti.biz/faq/linux-unix-shell-check-if-directory-empty/
 # https://stackoverflow.com/questions/8352851/how-to-call-one-shell-script-from-another-shell-script
+# https://serverfault.com/questions/151986/rsync-command-to-synchronize-two-ntfs-drives
