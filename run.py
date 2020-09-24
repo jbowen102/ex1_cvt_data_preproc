@@ -657,6 +657,9 @@ class SingleRun(object):
                 ow_answer = input("\n%s already exists in figs folder. "
                                   "Overwrite? (Y/N)\n> "
                                         % os.path.basename(wildcard_filename))
+            if ow_answer.lower() == "y":
+                os.remove(glob.glob(wildcard_filename)[0])
+                # continue with rest of function
             if ow_answer.lower() == "n":
                 # plot will be cleared in caller function.
                 return
