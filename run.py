@@ -85,11 +85,19 @@ class RunGroup(object):
                 continue # ignore any directories found
 
             if "decel" in file.lower() or "deccel" in file.lower():
-                # ThisRun = self.create_downhill_run(file)
-                decel_runs.append(file)
-                continue
+                # decel_runs.append(file)
+                # continue
+                try:
+                    ThisRun = self.create_downhill_run(file)
+                except FilenameError as exception_text:
+                    print(exception_text)
+                    # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
+                    input("\nRun creation failed with file '%s'.\n"
+                          "Press Enter to skip this run." % (file))
+                    print("\n")
+                    continue # Don't add to run dict
+
             else:
-                # ThisRun = self.create_ss_run(file)
                 try:
                     ThisRun = self.create_ss_run(file)
                 except FilenameError as exception_text:
@@ -111,7 +119,9 @@ class RunGroup(object):
                      file))
                 print("\n")
                 continue
+
             self.run_dict[ThisRun.get_run_label()] = ThisRun
+
         if decel_runs:
             print("Skipping these files because program can't process decel "
                                                                 "runs yet:")
@@ -551,6 +561,7 @@ class SingleRun(object):
 
     def abridge_data(self):
         # Implemented in child classes
+        # Different version of this function in SSRun vs. DownhillRun
         pass
 
     def add_math_channels(self):
@@ -770,8 +781,6 @@ class SSRun(SingleRun):
         deg or whatever throttle threshold not sustained for >2 seconds (or
         whatever time threshold).
         """
-        # different version of this function in SSRun vs. DownhillRun
-
         # Define constants used to isolating valid events.
         self.THRTL_THRESH = 45 # degrees ("throttle threshold")
         self.THRTL_T_THRESH = 2 # seconds ("throttle time threshold")
@@ -981,17 +990,17 @@ class SSRun(SingleRun):
         self.add_ss_avgs()
 
     def add_ss_avgs(self):
-        WIN_SIZE_AVG = 51  # window size for speed rolling avg.
-        WIN_SIZE_SLOPE = 301 # win size for rolling slope of speed rolling avg.
+        win_size_avg = 51  # window size for speed rolling avg.
+        win_size_slope = 301 # win size for rolling slope of speed rolling avg.
 
-        GSPD_CR = 2.5     # mph. Ground speed (min) criterion for determining if
+        gspd_cr = 2.5     # mph. Ground speed (min) criterion for determining if
                           # steady-state event is moving rather than stationary.
-        GS_SLOPE_CR = 0.25  # mph/s.
+        gs_slope_cr = 0.25  # mph/s.
         # Ground-speed slope (max) criterion to est. steady-state. Abs value
 
-        ESPD_CR = 2750    # rpm. Engine speed (min) criterion for determining if
+        espd_cr = 2750    # rpm. Engine speed (min) criterion for determining if
                           # steady-state event is moving rather than stationary.
-        ES_SLOPE_CR = 100  # rpm/s.
+        es_slope_cr = 100  # rpm/s.
         # Engine-speed slope (max) criterion to est. steady-state. Abs value
 
         # Document in metadata string for output file:
@@ -1000,42 +1009,42 @@ class SSRun(SingleRun):
                           "gnd speed slope magnitude less than %s mph/s, "
                           "eng speed above %s rpm, "
                           "eng speed slope magnitude less than %s rpm/s | "
-                            % (GSPD_CR, GS_SLOPE_CR, ESPD_CR, ES_SLOPE_CR))
+                            % (gspd_cr, gs_slope_cr, espd_cr, es_slope_cr))
         self.meta_str += ("Steady-state calc rolling window sizes: "
                                                 "%d for avg, %d for slope | "
-                                            % (WIN_SIZE_AVG, WIN_SIZE_SLOPE))
+                                            % (win_size_avg, win_size_slope))
 
         # Create rolling average and rolling (regression) slope of rolling avg
         # for ground speed.
         self.math_df["gs_rolling_avg"] = self.sync_df.rolling(
-                           window=WIN_SIZE_AVG, center=True)["gnd_speed"].mean()
+                           window=win_size_avg, center=True)["gnd_speed"].mean()
         # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.rolling.html
 
         self.Doc.print("\nCalculating rolling regression on ground speed data...")
         self.math_df["gs_rolling_slope"] = self.math_df["gs_rolling_avg"].rolling(
-                    window=WIN_SIZE_SLOPE, center=True).apply(
+                    window=win_size_slope, center=True).apply(
                         lambda x: np.polyfit(x.index/SAMPLING_FREQ, x, 1)[0])
         self.Doc.print("...done")
 
         # Create rolling average and rolling (regression) slope of rolling avg
         # for engine speed.
         self.math_df["es_rolling_avg"] = self.sync_df.rolling(
-                          window=WIN_SIZE_AVG, center=True)["engine_spd"].mean()
+                          window=win_size_avg, center=True)["engine_spd"].mean()
 
         self.Doc.print("Calculating rolling regression on engine speed data...")
         self.math_df["es_rolling_slope"] = self.math_df["es_rolling_avg"].rolling(
-                    window=WIN_SIZE_SLOPE, center=True).apply(
+                    window=win_size_slope, center=True).apply(
                         lambda x: np.polyfit(x.index/SAMPLING_FREQ, x, 1)[0])
         self.Doc.print("...done")
 
         # Apply speed and speed slope criteria to isolate steady-state events.
-        ss_filter = (      (self.math_df["gs_rolling_avg"] > GSPD_CR)
-                         & (self.math_df["gs_rolling_slope"] < GS_SLOPE_CR)
-                         & (self.math_df["gs_rolling_slope"] > -GS_SLOPE_CR)
-                         & (self.math_df["es_rolling_avg"] > ESPD_CR)
-                         & (self.math_df["es_rolling_slope"] < ES_SLOPE_CR)
-                         & (self.math_df["es_rolling_slope"] > -ES_SLOPE_CR) )
-        # GS_SLOPE_CR and ES_SLOPE_CR are abs value so have to apply on high
+        ss_filter = (      (self.math_df["gs_rolling_avg"] > gspd_cr)
+                         & (self.math_df["gs_rolling_slope"] < gs_slope_cr)
+                         & (self.math_df["gs_rolling_slope"] > -gs_slope_cr)
+                         & (self.math_df["es_rolling_avg"] > espd_cr)
+                         & (self.math_df["es_rolling_slope"] < es_slope_cr)
+                         & (self.math_df["es_rolling_slope"] > -es_slope_cr) )
+        # gs_slope_cr and es_slope_cr are abs value so have to apply on high
         # and low end.
         self.Doc.print("\nTotal data points that fail steady-state criteria: %d"
                                                         % sum(~ss_filter), True)
@@ -1158,6 +1167,93 @@ class DownhillRun(SingleRun):
     """Represents a single run with downhill engine-braking operation."""
 
     def abridge_data(self):
+        # Apply rolling avg filter to smooth data first.
+        # Apply mask to data to find which sections ground speed is increasing
+        # w/ pedal not pressed.
+
+        # Need to repair any gaps in INCA samples. If pedal was actuated
+        # when sampling cut out, and it was still actuated when the sampling
+        # resumed, the abridge_data() algorithmm will treat that as a pedal lift
+        # when it likely wasn't.
+        self.knit_pedal_gaps()
+
+        win_size_avg = 101  # window size for speed rolling avg.
+        win_size_slope = 301 # win size for rolling slope of speed rolling avg.
+        gspd_cr = 2.5     # mph. Ground speed (min) criterion for discerning
+                          # valid downhill event.
+        gs_slope_cr = +1.0  # mph/s.
+        throttle_cr = 5.0 # deg
+        # Ground-speed slope min criterion to identify increasing speed.
+
+        # Create rolling average of ground speed (unabridged data).
+        gs_rolling_avg = self.sync_df.rolling(
+                           window=win_size_avg, center=True)["gnd_speed"].mean()
+        # gs_rolling_avg = self.sync_df.rolling(
+        #                    window=501, center=True)["gnd_speed"].mean()
+
+        self.Doc.print("\nCalculating rolling regression on ground speed data...")
+        gs_rolling_slope = gs_rolling_avg.rolling(
+                                window=win_size_slope, center=True).apply(
+                        lambda x: np.polyfit(x.index/SAMPLING_FREQ, x, 1)[0])
+        # gs_rolling_slope2 = gs_rolling_slope.rolling(
+        #                         window=301, center=True).apply(
+        #                 lambda x: np.polyfit(x.index/SAMPLING_FREQ, x, 1)[0])
+        self.Doc.print("...done")
+
+        # Apply pedal, throttle, and speed slope criteria to isolate steady-state events.
+        downhill_filter = (   (  (self.sync_df["pedal_sw"].isna())
+                               | (self.sync_df["throttle"] < throttle_cr)   )
+                               & (gs_rolling_avg > gspd_cr)
+                               & (gs_rolling_slope > gs_slope_cr)     )
+       # NaNs in pedal channel treated as pedal up.
+
+        gs_rol_avg_mskd = gs_rolling_avg.mask(~downhill_filter)
+
+        # ax1 = plt.subplot(311)
+        # ax1.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gnd_speed"])
+        # ax1.plot(gs_rolling_avg.index/SAMPLING_FREQ, gs_rolling_avg)
+        #
+        # ax2 = plt.subplot(312)
+        # ax2.plot(gs_rolling_slope.index/SAMPLING_FREQ, gs_rolling_slope)
+        #
+        # ax3 = plt.subplot(313)
+        # ax3.plot(gs_rolling_slope2.index/SAMPLING_FREQ, gs_rolling_slope2)
+
+        ax1 = plt.subplot(411)
+        ax1.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gnd_speed"])
+        ax1.plot(gs_rolling_avg.index/SAMPLING_FREQ, gs_rolling_avg)
+        ax1.plot(gs_rol_avg_mskd.index/SAMPLING_FREQ, gs_rol_avg_mskd)
+
+        ax2 = plt.subplot(412)
+        ax2.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["engine_spd"])
+
+        ax3 = plt.subplot(413)
+        ax3.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["pedal_sw"])
+
+        ax3 = plt.subplot(414)
+        ax3.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["throttle"])
+
+        # self.export_plot("downhill_abr", False, "")
+        fig_filepath = "%s/%s_%s.png" % (PLOT_DIR, self.run_label, "downhill_abr")
+        plt.savefig(fig_filepath)
+        plt.clf()
+
+    def add_math_channels(self):
+        # This performs all the actions in the parent class's method
+        pass
+        super(DownhillRun, self).add_math_channels()
+        self.add_downhill_avgs()
+
+    def add_downhill_avgs(self):
+        pass
+
+    def plot_data(self, overwrite=False, description=None):
+        # This performs all the actions in the parent class's method
+        pass
+        super(DownhillRun, self).plot_data(overwrite, description)
+        self.plot_downhill_slope(overwrite, description)
+
+    def plot_downhill_slope(self, overwrite=False, description=None):
         pass
 
     def get_run_type(self):
