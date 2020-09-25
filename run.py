@@ -153,7 +153,7 @@ class RunGroup(object):
                 exception_trace = traceback.format_exc()
                 # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
                 out_file = log_exception(exception_trace, RunObj.get_output())
-                input("\nProcessing failed on run '%s'.\nOutput and exception "
+                input("\nProcessing failed on run %s.\nOutput and exception "
                     "trace written to '%s' on Desktop.\n"
                     "Press Enter to skip this run." % (run_num, out_file))
                 print("\n")
@@ -180,7 +180,7 @@ class RunGroup(object):
                 exception_trace = traceback.format_exc()
                 # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
                 out_file = log_exception(exception_trace, RunObj.get_output())
-                input("\nPlotting failed on run '%s'.\nOutput and exception "
+                input("\nPlotting failed on run %s.\nOutput and exception "
                   "trace written to '%s' on Desktop.\n"
                      "Press Enter to skip this run." % (run_num, out_file))
                 # Stage for removal from run dict.
@@ -206,7 +206,7 @@ class RunGroup(object):
                 exception_trace = traceback.format_exc()
                 # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
                 out_file = log_exception(exception_trace, RunObj.get_output())
-                input("\nExporting failed on run '%s'.\nOutput and exception "
+                input("\nExporting failed on run %s.\nOutput and exception "
                     "trace written to '%s' on Desktop.\n"
                     "Press Enter to skip this run." % (run_num, out_file))
                 # Stage for removal from run dict.
@@ -1183,6 +1183,7 @@ class DownhillRun(SingleRun):
                           # valid downhill event.
         gs_slope_cr = +1.0  # mph/s.
         throttle_cr = 5.0 # deg
+        gs_slope_t_cr = 3.0 # seconds
         # Ground-speed slope min criterion to identify increasing speed.
 
         # Create rolling average of ground speed (unabridged data).
@@ -1209,15 +1210,47 @@ class DownhillRun(SingleRun):
 
         gs_rol_avg_mskd = gs_rolling_avg.mask(~downhill_filter)
 
-        # ax1 = plt.subplot(311)
-        # ax1.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gnd_speed"])
-        # ax1.plot(gs_rolling_avg.index/SAMPLING_FREQ, gs_rolling_avg)
-        #
-        # ax2 = plt.subplot(312)
-        # ax2.plot(gs_rolling_slope.index/SAMPLING_FREQ, gs_rolling_slope)
-        #
-        # ax3 = plt.subplot(313)
-        # ax3.plot(gs_rolling_slope2.index/SAMPLING_FREQ, gs_rolling_slope2)
+        valid_times = gs_rol_avg_mskd[~gs_rol_avg_mskd.isna()]
+
+        if len(valid_times) == 0:
+            # If no times were stored, then alert user but continue with
+            # program.
+            input("\nNo valid downhill events found in run %s (Criterion: "
+            "throttle < %ddeg and speed slope >%d mph/s for >%ds).\n"
+            "Press Enter to acknowledge and continue processing data without abridging."
+                    % (self.run_label, throttle_cr, gs_slope_cr, gs_slope_t_cr))
+            return
+
+        cont_ranges = [] # ranges w/ continuous data (no NaNs)
+        current_range = [valid_times.index[0]]
+        for i, time in enumerate(valid_times.index[1:]):
+            prev_time = valid_times.index[i] # i is behind by one.
+            if time - prev_time > 1:
+                current_range.append(prev_time)
+                cont_ranges.append(current_range)
+                # Reset range
+                current_range = [time]
+        # Add last value to end of last range
+        current_range.append(time)
+        cont_ranges.append(current_range)
+
+        valid_ranges = []
+        for range in cont_ranges:
+            if range[1]-range[0] > gs_slope_t_cr*SAMPLING_FREQ:
+                # Must have 100 data points (seconds) to count.
+                valid_ranges.append(range)
+                print(range[1]-range[0])
+        print(valid_ranges)
+
+
+        if not valid_ranges:
+            # If no times were stored, then alert user but continue with
+            # program.
+            input("\nNo valid downhill events found in run %s (Criterion: "
+            "throttle < %ddeg and speed slope >%d mph/s for >%ds).\n"
+            "Press Enter to acknowledge and continue processing data without abridging."
+                    % (self.run_label, throttle_cr, gs_slope_cr, gs_slope_t_cr))
+            return
 
         ax1 = plt.subplot(411)
         ax1.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gnd_speed"])
@@ -1248,10 +1281,10 @@ class DownhillRun(SingleRun):
         pass
 
     def plot_data(self, overwrite=False, description=None):
-        # This performs all the actions in the parent class's method
         pass
-        super(DownhillRun, self).plot_data(overwrite, description)
-        self.plot_downhill_slope(overwrite, description)
+        # This performs all the actions in the parent class's method
+        # super(DownhillRun, self).plot_data(overwrite, description)
+        # self.plot_downhill_slope(overwrite, description)
 
     def plot_downhill_slope(self, overwrite=False, description=None):
         pass
