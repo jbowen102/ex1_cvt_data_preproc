@@ -11,6 +11,7 @@ import getpass
 from PIL import Image
 import hashlib
 import glob
+from tqdm import tqdm
 
 try:
     import matplotlib
@@ -23,6 +24,12 @@ except ImportError:
 # https://stackoverflow.com/questions/3496592/conditional-import-of-modules-in-python
 print("...done\n")
 
+# Create and register a new tqdm instance with pandas. I don't know how this works.
+tqdm.pandas()
+# https://stackoverflow.com/questions/18603270/progress-indicator-during-pandas-operations
+# https://pypi.org/project/tqdm/#pandas-integration
+# Gives warning if tqdm version <4.33.0). Ignore.
+# https://github.com/tqdm/tqdm/issues/780
 
 # global constancts
 RAW_INCA_DIR = "./raw_data/INCA"
@@ -892,23 +899,24 @@ class SSRun(SingleRun):
         if keep:
             valid_event_times.append( [ped_buffer[0], ped_buffer[-1]] )
 
-        self.Doc.print("\nValid steady-state ranges:")
-        for event_time in valid_event_times:
-            self.Doc.print("\t%0.2f\t->\t%0.2f"
-               % (event_time[0] / SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
-
         if not valid_event_times:
             # If no times were stored, then alert user but continue with
             # program.
-            input("\nNo valid pedal-down events found in run %s (Criterion: "
+            input("\nNo valid pedal-down events found in run %s (Criteria: "
             "throttle >%d deg for >%ds total).\nPress Enter to acknowledge and "
             "continue processing data without abridging."
                     % (self.run_label, self.THRTL_THRESH, self.THRTL_T_THRESH))
             return
         else:
             # Document in output file
-            self.meta_str += ("Removed pedal events where throttle didn't exceed "
-                "%d deg for >%ds | " % (self.THRTL_THRESH, self.THRTL_T_THRESH))
+            self.meta_str += ("Isolated events where throttle exceeded "
+                "%d deg for >%ds. Removed extraneous surrounding events. | "
+                                    % (self.THRTL_THRESH, self.THRTL_T_THRESH))
+
+        self.Doc.print("\nValid steady-state ranges:")
+        for event_time in valid_event_times:
+            self.Doc.print("\t%0.2f\t->\t%0.2f"
+               % (event_time[0] / SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
 
         # make sure if two >45 deg events (w/ pedal lift between) are closer
         # than 5s, don't cut into either one. Look at each pair of end/start
@@ -1022,8 +1030,9 @@ class SSRun(SingleRun):
 
         self.Doc.print("\nCalculating rolling regression on ground speed data...")
         self.math_df["gs_rolling_slope"] = self.math_df["gs_rolling_avg"].rolling(
-                    window=win_size_slope, center=True).apply(
+                    window=win_size_slope, center=True).progress_apply(
                         lambda x: np.polyfit(x.index/SAMPLING_FREQ, x, 1)[0])
+        # https://stackoverflow.com/questions/18603270/progress-indicator-during-pandas-operations
         self.Doc.print("...done")
 
         # Create rolling average and rolling (regression) slope of rolling avg
@@ -1033,7 +1042,7 @@ class SSRun(SingleRun):
 
         self.Doc.print("Calculating rolling regression on engine speed data...")
         self.math_df["es_rolling_slope"] = self.math_df["es_rolling_avg"].rolling(
-                    window=win_size_slope, center=True).apply(
+                    window=win_size_slope, center=True).progress_apply(
                         lambda x: np.polyfit(x.index/SAMPLING_FREQ, x, 1)[0])
         self.Doc.print("...done")
 
@@ -1182,26 +1191,23 @@ class DownhillRun(SingleRun):
         gspd_cr = 2.5     # mph. Ground speed (min) criterion for discerning
                           # valid downhill event.
         gs_slope_cr = +1.0  # mph/s.
-        throttle_cr = 5.0 # deg
-        gs_slope_t_cr = 3.0 # seconds
-        # Ground-speed slope min criterion to identify increasing speed.
+        # Ground-speed slope min criterion to identify increasing speed downhill.
+        gs_slope_t_cr = 3.0 # seconds. Continuous amount of time the slope
+                            # criterion must be met to
+        throttle_cr = 5.0 # deg. Anything below this interpreted as closed throt.
 
         # Create rolling average of ground speed (unabridged data).
         gs_rolling_avg = self.sync_df.rolling(
                            window=win_size_avg, center=True)["gnd_speed"].mean()
-        # gs_rolling_avg = self.sync_df.rolling(
-        #                    window=501, center=True)["gnd_speed"].mean()
 
         self.Doc.print("\nCalculating rolling regression on ground speed data...")
         gs_rolling_slope = gs_rolling_avg.rolling(
-                                window=win_size_slope, center=True).apply(
+                            window=win_size_slope, center=True).progress_apply(
                         lambda x: np.polyfit(x.index/SAMPLING_FREQ, x, 1)[0])
-        # gs_rolling_slope2 = gs_rolling_slope.rolling(
-        #                         window=301, center=True).apply(
-        #                 lambda x: np.polyfit(x.index/SAMPLING_FREQ, x, 1)[0])
         self.Doc.print("...done")
 
-        # Apply pedal, throttle, and speed slope criteria to isolate steady-state events.
+        # Apply pedal, throttle, speed, and speed slope criteria to isolate
+        # downhill, pedal-up events.
         downhill_filter = (   (  (self.sync_df["pedal_sw"].isna())
                                | (self.sync_df["throttle"] < throttle_cr)   )
                                & (gs_rolling_avg > gspd_cr)
@@ -1234,23 +1240,50 @@ class DownhillRun(SingleRun):
         current_range.append(time)
         cont_ranges.append(current_range)
 
+        self.Doc.print("\nDownhill ranges (before imposing length req.):", True)
+        for event_time in cont_ranges:
+            self.Doc.print("\t%0.2f\t->\t%0.2f"
+               % (event_time[0] / SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ), True)
+
         valid_ranges = []
         for range in cont_ranges:
             if range[1]-range[0] > gs_slope_t_cr*SAMPLING_FREQ:
-                # Must have 100 data points (seconds) to count.
+                # Must have > gs_slope_t_cr seconds to count.
                 valid_ranges.append(range)
-                print(range[1]-range[0])
-        print(valid_ranges)
-
+                # print(range[1]-range[0])
 
         if not valid_ranges:
             # If no times were stored, then alert user but continue with
             # program.
-            input("\nNo valid downhill events found in run %s (Criterion: "
-            "throttle < %ddeg and speed slope >%d mph/s for >%ds).\n"
+            input("\nNo valid downhill events found in run %s (Criteria: "
+            "speed slope >%d mph/s, speed >%d mph, and throttle <%d deg for >%ds).\n"
             "Press Enter to acknowledge and continue processing data without abridging."
-                    % (self.run_label, throttle_cr, gs_slope_cr, gs_slope_t_cr))
+            % (self.run_label, gs_slope_cr, gspd_cr, throttle_cr, gs_slope_t_cr))
             return
+        else:
+            # Document in output file
+            self.meta_str += ("Isolated events where speed slope exceeded %d "
+            "mph/s with speed >%d mph and throttle <%d deg for >%ds. "
+            "Removed extraneous surrounding events. | "
+                % (gs_slope_cr, gspd_cr, throttle_cr, gs_slope_t_cr))
+
+        self.Doc.print("\nValid downhill ranges:")
+        for event_time in valid_ranges:
+            self.Doc.print("\t%0.2f\t->\t%0.2f"
+               % (event_time[0] / SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
+
+
+        # Add buffers on each side - find closest point where ground speed <
+        # some threshold. Then add extra buffer to that?
+        # Could do this with another filter. Then find closest val in filtered
+        # list. Bias down for first range val, bias up for second.
+
+
+        self.Doc.print("\nAfter widening range to capture complete event(s):")
+        for event_time in valid_ranges:
+            self.Doc.print("\t%0.2f\t->\t%0.2f"
+                % (event_time[0]/SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
+
 
         ax1 = plt.subplot(411)
         ax1.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gnd_speed"])
