@@ -574,7 +574,7 @@ class SingleRun(object):
         pass
 
     def add_math_channels(self):
-        self.math_df = pd.DataFrame(index=self.sync_df.index)
+        self.math_df = pd.DataFrame(index=self.abr_df.index)
         # https://stackoverflow.com/questions/18176933/create-an-empty-data-frame-with-index-from-another-data-frame
         self.add_cvt_ratio()
 
@@ -586,11 +586,11 @@ class SingleRun(object):
         AXLE_RATIO = 11.47
         GEARBOX_RATIO = 1.95
 
-        gnd_spd_in_min = self.sync_df["gnd_speed"] * 5280 * 12/60 # inches/min
+        gnd_spd_in_min = self.abr_df["gnd_speed"] * 5280 * 12/60 # inches/min
 
         tire_ang_spd = gnd_spd_in_min / tire_circ
         self.math_df["input_shaft_ang_spd"] = tire_ang_spd * AXLE_RATIO * GEARBOX_RATIO
-        self.math_df["cvt_ratio"] = (self.sync_df["engine_spd"]
+        self.math_df["cvt_ratio"] = (self.abr_df["engine_spd"]
                                         / self.math_df["input_shaft_ang_spd"])
 
         # # Remove any values that are zero or > 5 (including infinite).
@@ -598,67 +598,20 @@ class SingleRun(object):
             | (self.math_df["cvt_ratio"] == 0), inplace=True)  # replaces w/ NaN
 
         # Transcribe to main DF for export
-        self.sync_df["CVT_ratio_calc"] = self.math_df["cvt_ratio"].copy()
+        self.abr_df["CVT_ratio_calc"] = self.math_df["cvt_ratio"].copy()
         CHANNEL_UNITS["CVT_ratio_calc"] = "rpm/rpm"
 
     def plot_data(self, overwrite=False, description=None):
         self.plot_abridge_compare(overwrite, description)
 
     def plot_abridge_compare(self, overwrite=False, description=None):
-        ax1 = plt.subplot(211)
-        # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
-        color = "tab:blue"
-        ax1.plot(self.raw_inca_df.index, self.raw_inca_df["throttle"],
-                                            color=color, label="Throttle (og)")
-        plt.title("Throttle vs. Time (Run %s)" % self.run_label)
-        ax1.set_ylim([-20, 80]) # scale down pedal switch
-        ax1.set_yticks([0, 20, 40, 60, 80])
-        ax1.set_ylabel("Throttle (deg)", color=color)
-        ax1.tick_params(axis="y", labelcolor=color)
-
-        ax2 = ax1.twinx() # second plot on same x axis
-        # https://matplotlib.org/gallery/api/two_scales.html
-        color = "tab:red"
-        ax2.plot(self.raw_inca_df.index, self.raw_inca_df["pedal_sw"],
-                                        color=color, label="Pedal Switch (og)")
-        ax2.set_ylim([-.25, 8]) # scale down pedal switch
-        ax2.set_yticks([0, 1])
-        ax2.set_ylabel("Pedal Switch", color=color)
-        ax2.tick_params(axis="y", labelcolor=color)
-        plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
-
-        ax3 = plt.subplot(212, sharex=ax1, sharey=ax1)
-        color = "tab:blue"
-        # Convert DF indices from hundredths of a second to seconds
-        sync_time_series = [round(ti/SAMPLING_FREQ, 2)
-                                                for ti in self.sync_df.index]
-        ax3.plot(sync_time_series, self.sync_df["throttle"],
-                                                    label="Throttle (synced)")
-        plt.xlabel("Time (s)")
-        # https://matplotlib.org/3.2.1/gallery/subplots_axes_and_figures/shared_axis_demo.html#sphx-glr-gallery-subplots-axes-and-figures-shared-axis-demo-py
-
-        ax3.set_ylim([-20, 80]) # scale down pedal switch
-        ax3.set_yticks([0, 20, 40, 60, 80])
-        ax3.set_ylabel("Throttle (deg)", color=color)
-        ax3.tick_params(axis="y", labelcolor=color)
-
-        ax4 = ax3.twinx() # second plot on same x axis
-        # https://matplotlib.org/gallery/api/two_scales.html
-        color = "tab:red"
-        ax4.plot(sync_time_series, self.sync_df["pedal_sw"],
-                                    color=color, label="Pedal Switch (synced)")
-        ax4.set_ylim([-.25, 8]) # scale down pedal switch
-        ax4.set_yticks([0, 1])
-        ax4.set_ylabel("Pedal Switch", color=color)
-        ax4.tick_params(axis="y", labelcolor=color)
-
-        # plt.show() # can't use w/ WSL. Export instead.
-        # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
-        self.export_plot("abr", overwrite, description)
-        plt.clf()
-        # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
+        # Implemented in child classes
+        # Different version of this function in SSRun vs. DownhillRun
+        pass
 
     def export_plot(self, type, overwrite, description):
+        """Exports plot that's already been created with another method.
+        Assumes caller method will clear figure afterward."""
         if description:
             fig_filepath = ("%s/%s_%s-%s.png"
                                 % (PLOT_DIR, self.run_label, type, description))
@@ -678,11 +631,15 @@ class SingleRun(object):
                                   "Overwrite? (Y/N)\n> "
                                         % os.path.basename(wildcard_filename))
             if ow_answer.lower() == "y":
-                os.remove(glob.glob(wildcard_filename)[0])
+                for filepath in glob.glob(wildcard_filename):
+                    os.remove(filepath)
                 # continue with rest of function
             if ow_answer.lower() == "n":
                 # plot will be cleared in caller function.
                 return
+        elif glob.glob(wildcard_filename) and overwrite:
+            for filepath in glob.glob(wildcard_filename):
+                os.remove(filepath)
 
         plt.savefig(fig_filepath)
         # Calculate unique hash value (like a fingerprint) to output in CSV's
@@ -698,7 +655,7 @@ class SingleRun(object):
                                                             % (type, hash_text))
 
     def export_data(self, overwrite=False, description=None):
-        export_df = self.sync_df.drop(columns=["time_raw_inca", "time_raw_edaq"])
+        export_df = self.abr_df.drop(columns=["time_raw_inca", "time_raw_edaq"])
         # https://stackoverflow.com/questions/29763620/how-to-select-all-columns-except-one-column-in-pandas
 
         # Create to list of lists for easier writing out
@@ -962,7 +919,7 @@ class SSRun(SingleRun):
         for event_time in valid_event_times_c:
             self.Doc.print("\t%0.2f\t->\t%0.2f"
                % (event_time[0] / SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
-        self.Doc.print("\n")
+        self.Doc.print("\n", True)
 
         # Split DataFrame into valid pieces; store in lists
         valid_events = []
@@ -992,14 +949,14 @@ class SSRun(SingleRun):
 
         # Now re-assemble the DataFrame with only valid events.
         # https://pandas.pydata.org/pandas-docs/stable/user_guide/merging.html
-        self.sync_df = pd.concat(valid_events)
-        self.Doc.print("\nsync_df after abridgement:", True)
-        self.Doc.print(self.sync_df.to_string(max_rows=10, max_cols=7,
+        self.abr_df = pd.concat(valid_events)
+        self.Doc.print("\nabr_df after abridgement:", True)
+        self.Doc.print(self.abr_df.to_string(max_rows=10, max_cols=7,
                                                     show_dimensions=True), True)
 
         self.Doc.print("\nData time span: %.2f -> %.2f (%d data points)" %
-          (self.sync_df.index[0]/SAMPLING_FREQ,
-                 self.sync_df.index[-1]/SAMPLING_FREQ, len(self.sync_df.index)))
+          (self.abr_df.index[0]/SAMPLING_FREQ,
+                 self.abr_df.index[-1]/SAMPLING_FREQ, len(self.abr_df.index)))
 
     def add_math_channels(self):
         # This performs all the actions in the parent class's method
@@ -1033,7 +990,7 @@ class SSRun(SingleRun):
 
         # Create rolling average and rolling (regression) slope of rolling avg
         # for ground speed.
-        self.math_df["gs_rolling_avg"] = self.sync_df.rolling(
+        self.math_df["gs_rolling_avg"] = self.abr_df.rolling(
                            window=win_size_avg, center=True)["gnd_speed"].mean()
         # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.rolling.html
 
@@ -1046,7 +1003,7 @@ class SSRun(SingleRun):
 
         # Create rolling average and rolling (regression) slope of rolling avg
         # for engine speed.
-        self.math_df["es_rolling_avg"] = self.sync_df.rolling(
+        self.math_df["es_rolling_avg"] = self.abr_df.rolling(
                           window=win_size_avg, center=True)["engine_spd"].mean()
 
         self.Doc.print("Calculating rolling regression on engine speed data...")
@@ -1105,15 +1062,15 @@ class SSRun(SingleRun):
 
         # Transcribe to main DF for export
         # Leave out average SS slopes.
-        self.sync_df["SS_gnd_spd_avg_calc"] = self.math_df["SS_gnd_spd_avg"]
-        self.sync_df["SS_eng_spd_avg_calc"] = self.math_df["SS_eng_spd_avg"]
-        self.sync_df["SS_cvt_ratio_avg_calc"] = self.math_df["SS_cvt_ratio_avg"]
+        self.abr_df["SS_gnd_spd_avg_calc"] = self.math_df["SS_gnd_spd_avg"]
+        self.abr_df["SS_eng_spd_avg_calc"] = self.math_df["SS_eng_spd_avg"]
+        self.abr_df["SS_cvt_ratio_avg_calc"] = self.math_df["SS_cvt_ratio_avg"]
         CHANNEL_UNITS["SS_gnd_spd_avg_calc"] = CHANNEL_UNITS["gnd_speed"]
         CHANNEL_UNITS["SS_eng_spd_avg_calc"] = CHANNEL_UNITS["engine_spd"]
         CHANNEL_UNITS["SS_cvt_ratio_avg_calc"] = CHANNEL_UNITS["CVT_ratio_calc"]
 
-        self.Doc.print("\nsync_df after adding steady-state data:", True)
-        self.Doc.print(self.sync_df.to_string(max_rows=10, max_cols=7,
+        self.Doc.print("\nabr_df after adding steady-state data:", True)
+        self.Doc.print(self.abr_df.to_string(max_rows=10, max_cols=7,
                                                     show_dimensions=True), True)
 
         # pandas rolling(), apply(), regression references:
@@ -1136,13 +1093,67 @@ class SSRun(SingleRun):
         super(SSRun, self).plot_data(overwrite, description)
         self.plot_ss_range(overwrite, description)
 
+    def plot_abridge_compare(self, overwrite=False, description=None):
+        ax1 = plt.subplot(211)
+        # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
+        color = "tab:blue"
+        ax1.plot(self.raw_inca_df.index, self.raw_inca_df["throttle"],
+                                            color=color, label="Throttle (og)")
+        plt.title("Throttle vs. Time (Run %s)" % self.run_label)
+        ax1.set_ylim([-20, 80]) # scale down pedal switch
+        ax1.set_yticks([0, 20, 40, 60, 80])
+        ax1.set_ylabel("Throttle (deg)", color=color)
+        ax1.tick_params(axis="y", labelcolor=color)
+
+        ax2 = ax1.twinx() # second plot on same x axis
+        # https://matplotlib.org/gallery/api/two_scales.html
+        color = "tab:red"
+        ax2.plot(self.raw_inca_df.index, self.raw_inca_df["pedal_sw"],
+                                        color=color, label="Pedal Switch (og)")
+        ax2.set_ylim([-.25, 8]) # scale down pedal switch
+        ax2.set_yticks([0, 1])
+        ax2.set_ylabel("Pedal Switch", color=color)
+        ax2.tick_params(axis="y", labelcolor=color)
+        plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
+
+        ax3 = plt.subplot(212, sharex=ax1, sharey=ax1)
+        color = "tab:blue"
+        # Convert DF indices from hundredths of a second to seconds
+        sync_time_series = [round(ti/SAMPLING_FREQ, 2)
+                                                for ti in self.abr_df.index]
+        ax3.plot(sync_time_series, self.abr_df["throttle"],
+                                                    label="Throttle (synced)")
+        plt.xlabel("Time (s)")
+        # https://matplotlib.org/3.2.1/gallery/subplots_axes_and_figures/shared_axis_demo.html#sphx-glr-gallery-subplots-axes-and-figures-shared-axis-demo-py
+
+        ax3.set_ylim([-20, 80]) # scale down pedal switch
+        ax3.set_yticks([0, 20, 40, 60, 80])
+        ax3.set_ylabel("Throttle (deg)", color=color)
+        ax3.tick_params(axis="y", labelcolor=color)
+
+        ax4 = ax3.twinx() # second plot on same x axis
+        # https://matplotlib.org/gallery/api/two_scales.html
+        color = "tab:red"
+        ax4.plot(sync_time_series, self.abr_df["pedal_sw"],
+                                    color=color, label="Pedal Switch (synced)")
+        ax4.set_ylim([-.25, 8]) # scale down pedal switch
+        ax4.set_yticks([0, 1])
+        ax4.set_ylabel("Pedal Switch", color=color)
+        ax4.tick_params(axis="y", labelcolor=color)
+
+        # plt.show() # can't use w/ WSL. Export instead.
+        # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
+        self.export_plot("abr", overwrite, description)
+        plt.clf()
+        # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
+
     def plot_ss_range(self, overwrite=False, description=None):
         ax1 = plt.subplot(311)
-        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gnd_speed"],
+        plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["gnd_speed"],
                                                         label="Ground Speed")
-        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.math_df["gs_rolling_avg"],
+        plt.plot(self.abr_df.index/SAMPLING_FREQ, self.math_df["gs_rolling_avg"],
                                                         label="Rolling Avg")
-        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.math_df["gs_rol_avg_mskd"],
+        plt.plot(self.abr_df.index/SAMPLING_FREQ, self.math_df["gs_rol_avg_mskd"],
                                                         label="Steady-state")
         plt.title("Steady-state Isolation (Run %s)" % self.run_label)
         plt.ylabel("Speed (mph)")
@@ -1151,11 +1162,11 @@ class SSRun(SingleRun):
 
         ax2 = plt.subplot(312, sharex=ax1)
         # Convert DF indices from hundredths of a second to seconds
-        plt.plot(self.sync_df.index/SAMPLING_FREQ,
-                        self.sync_df["engine_spd"], label="Engine Speed")
-        plt.plot(self.sync_df.index/SAMPLING_FREQ,
+        plt.plot(self.abr_df.index/SAMPLING_FREQ,
+                        self.abr_df["engine_spd"], label="Engine Speed")
+        plt.plot(self.abr_df.index/SAMPLING_FREQ,
                         self.math_df["es_rolling_avg"], label="Rolling Avg")
-        plt.plot(self.sync_df.index/SAMPLING_FREQ,
+        plt.plot(self.abr_df.index/SAMPLING_FREQ,
                         self.math_df["es_rol_avg_mskd"], label="Steady-state")
 
         plt.ylabel("Engine Speed (rpm)")
@@ -1164,7 +1175,7 @@ class SSRun(SingleRun):
 
         ax3 = plt.subplot(313, sharex=ax1)
         # Convert DF indices from hundredths of a second to seconds
-        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["throttle"],
+        plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["throttle"],
                                                         label="Throttle")
 
         plt.xlabel("Time (s)")
@@ -1232,11 +1243,16 @@ class DownhillRun(SingleRun):
             # If no times were stored, then alert user but continue with
             # program.
             input("\nNo valid downhill events found in run %s (Criterion: "
-            "throttle < %ddeg and speed slope >%d mph/s for >%ds).\n"
+            "throttle <%ddeg and speed slope >%d mph/s for >%ds).\n"
             "Press Enter to acknowledge and continue processing data without abridging."
                     % (self.run_label, throttle_cr, gs_slope_cr, gs_slope_t_cr))
+            # Take care of needed assignments that are typically down below.
+            self.sync_df["gs_rolling_avg"] = gs_rolling_avg
+            self.sync_df["gs_rol_avg_mskd"] = gs_rol_avg_mskd
+            self.abr_df = self.sync_df.copy(deep=True)
             return
 
+        # Identify separate continuous ranges.
         cont_ranges = [] # ranges w/ continuous data (no NaNs)
         current_range = [valid_times.index[0]]
         for i, time in enumerate(valid_times.index[1:]):
@@ -1274,8 +1290,14 @@ class DownhillRun(SingleRun):
             # Document in output file
             self.meta_str += ("Isolated events where speed slope exceeded %d "
             "mph/s with speed >%d mph and throttle <%d deg for >%ds. "
-            "Removed extraneous surrounding events. | "
+            "Removed extraneous surrounding events. "
+            "These same criteria were used for the downhill calcs. | "
                 % (gs_slope_cr, gspd_cr, throttle_cr, gs_slope_t_cr))
+
+        # Document window sizes in metadata string for output file:
+        self.meta_str += ("Isolation and downhill calc rolling window sizes: "
+                                                "%d for avg, %d for slope | "
+                                            % (win_size_avg, win_size_slope))
 
         self.Doc.print("\nValid downhill ranges:")
         for event_range in valid_ranges:
@@ -1338,10 +1360,14 @@ class DownhillRun(SingleRun):
         for event_time in valid_ranges_c:
             self.Doc.print("\t%0.2f\t->\t%0.2f"
                 % (event_time[0]/SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
-        self.Doc.print("\n")
+        self.Doc.print("\n", True)
 
         # Split DataFrame into valid pieces; store in lists
         valid_events = []
+        # Cut up and re-join rolling avg channels too for later use.
+        # Piggyback on sync_df for now.
+        self.sync_df["gs_rolling_avg"] = gs_rolling_avg
+        self.sync_df["gs_rol_avg_mskd"] = gs_rol_avg_mskd
         desired_start_t = 0
         for n, time_range in enumerate(valid_ranges_c):
             # create separate DataFrames for just this event
@@ -1368,33 +1394,15 @@ class DownhillRun(SingleRun):
 
         # Now re-assemble the DataFrame with only valid events.
         # https://pandas.pydata.org/pandas-docs/stable/user_guide/merging.html
-        self.sync_df = pd.concat(valid_events)
-        self.Doc.print("\nsync_df after abridgement:", True)
-        self.Doc.print(self.sync_df.to_string(max_rows=10, max_cols=7,
+        self.abr_df = pd.concat(valid_events)
+
+        self.Doc.print("\nabr_df after abridgement:", True)
+        self.Doc.print(self.abr_df.to_string(max_rows=10, max_cols=7,
                                                     show_dimensions=True), True)
 
         self.Doc.print("\nData time span: %.2f -> %.2f (%d data points)" %
-          (self.sync_df.index[0]/SAMPLING_FREQ,
-                 self.sync_df.index[-1]/SAMPLING_FREQ, len(self.sync_df.index)))
-
-        ax1 = plt.subplot(411)
-        ax1.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gnd_speed"])
-        ax1.plot(gs_rolling_avg.index/SAMPLING_FREQ, gs_rolling_avg)
-        ax1.plot(gs_rol_avg_mskd.index/SAMPLING_FREQ, gs_rol_avg_mskd)
-
-        ax2 = plt.subplot(412)
-        ax2.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["engine_spd"])
-
-        ax3 = plt.subplot(413)
-        ax3.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["pedal_sw"])
-
-        ax3 = plt.subplot(414)
-        ax3.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["throttle"])
-
-        # self.export_plot("downhill_abr", False, "")
-        fig_filepath = "%s/%s_%s.png" % (PLOT_DIR, self.run_label, "downhill_abr")
-        plt.savefig(fig_filepath)
-        plt.clf()
+          (self.abr_df.index[0]/SAMPLING_FREQ,
+                 self.abr_df.index[-1]/SAMPLING_FREQ, len(self.abr_df.index)))
 
     def add_math_channels(self):
         # This performs all the actions in the parent class's method
@@ -1406,13 +1414,94 @@ class DownhillRun(SingleRun):
         pass
 
     def plot_data(self, overwrite=False, description=None):
-        pass
         # This performs all the actions in the parent class's method
-        # super(DownhillRun, self).plot_data(overwrite, description)
-        # self.plot_downhill_slope(overwrite, description)
+        super(DownhillRun, self).plot_data(overwrite, description)
+        self.plot_downhill_slope(overwrite, description)
+
+    def plot_abridge_compare(self, overwrite=False, description=None):
+        ax1 = plt.subplot(211)
+        # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
+        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gnd_speed"])
+        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gs_rolling_avg"])
+        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gs_rol_avg_mskd"])
+
+        plt.title("Ground Speed vs. Time (Run %s)" % self.run_label)
+        ax1.set_ylabel("Speed (mph)")
+
+        plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
+
+        ax2 = plt.subplot(212, sharex=ax1)
+        # plt.plot(self.sync_df.index, self.sync_df["engine_spd"])
+
+        plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["gnd_speed"])
+        plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["gs_rolling_avg"])
+        plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["gs_rol_avg_mskd"])
+
+        # Remove rolling-avg channels added earlier.
+        del self.abr_df["gs_rolling_avg"]
+        del self.abr_df["gs_rol_avg_mskd"]
+
+        ax2.set_ylabel("Speed (mph)")
+        # plt.setp(ax2.get_xticklabels(), visible=False) # x labels only on bottom
+
+        # ax3 = plt.subplot(313, sharex=ax1)
+        # # Convert DF indices from hundredths of a second to seconds
+        # # abr_time_series = [round(ti/SAMPLING_FREQ, 2)
+        # #                                         for ti in self.abr_df.index]
+        # # color = "tab:red"
+        # # ax3.set_ylabel("Engine speed (rpm)")
+        # # plt.plot(self.raw_edaq_df.index, self.raw_edaq_df["pedal_sw"], color=color)
+        # #
+        # # ax4 = ax3.twinx() # second plot on same x axis
+        # # color = "tab:blue"
+        # # plt.plot(self.raw_inca_df.index, self.raw_inca_df["pedal_sw"], color=color)
+        #
+        # # plt.plot(sync_time_series, self.sync_df["gnd_speed"])
+        # # plt.plot(sync_time_series, self.abr_gs_rol_avg)
+        # # plt.plot(sync_time_series, self.abr_gs_rol_avg_mskd)
+        #
+        # ax3.set_xlabel("Time (s)")
+        # # https://matplotlib.org/3.2.1/gallery/subplots_axes_and_figures/shared_axis_demo.html#sphx-glr-gallery-subplots-axes-and-figures-shared-axis-demo-py
+        # ax3.set_ylabel("Speed (mph)")
+
+        # plt.show() # can't use w/ WSL. Export instead.
+        # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
+        self.export_plot("abr", overwrite, description)
+        plt.clf()
+        # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
 
     def plot_downhill_slope(self, overwrite=False, description=None):
-        pass
+        """Plot with downhill segments identified."""
+        ax1 = plt.subplot(411)
+        color = "k"
+        # https://matplotlib.org/3.1.0/gallery/color/named_colors.html
+        ax1.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gnd_speed"], color=color)
+        color = "c"
+        ax1.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gs_rolling_avg"], color=color)
+        color = "r"
+        ax1.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gs_rol_avg_mskd"], color=color)
+        ax1.set_ylabel("Speed (mph)")
+        plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
+        plt.title("Downhill Segments (Run %s)" % self.run_label)
+
+        ax2 = plt.subplot(412, sharex=ax1)
+        ax2.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["engine_spd"])
+        ax2.set_ylabel("Engine Speed (rpm)")
+        plt.setp(ax2.get_xticklabels(), visible=False) # x labels only on bottom
+
+        ax3 = plt.subplot(413, sharex=ax1)
+        ax3.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["pedal_sw"])
+        ax3.set_ylabel("Pedal Switch")
+        plt.setp(ax3.get_xticklabels(), visible=False) # x labels only on bottom
+
+        ax4 = plt.subplot(414, sharex=ax1)
+        ax4.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["throttle"])
+        ax4.set_ylabel("Throttle (deg)")
+
+        self.export_plot("downhill", overwrite, description)
+        # fig_filepath = "%s/%s_%s.png" % (PLOT_DIR, self.run_label, "downhill")
+        # plt.savefig(fig_filepath)
+        plt.clf()
 
     def get_run_type(self):
         return "DownhillRun"
