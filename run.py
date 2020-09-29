@@ -25,7 +25,9 @@ except ImportError:
 print("...done\n")
 
 # Create and register a new tqdm instance with pandas. I don't know how this works.
+print("Ignore this FutureWarning:")
 tqdm.pandas()
+print("\n")
 # https://stackoverflow.com/questions/18603270/progress-indicator-during-pandas-operations
 # https://pypi.org/project/tqdm/#pandas-integration
 # Gives warning if tqdm version <4.33.0). Ignore.
@@ -918,18 +920,20 @@ class SSRun(SingleRun):
             self.Doc.print("\t%0.2f\t->\t%0.2f"
                % (event_time[0] / SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
 
-        # make sure if two >45 deg events (w/ pedal lift between) are closer
+        # Make sure if two >45 deg events (w/ pedal lift between) are closer
         # than 5s, don't cut into either one. Look at each pair of end/start
         # points, and if they're closer than 5s, merge those two.
-        previous_pair = valid_event_times[0]
-        valid_event_times_c = valid_event_times.copy()
+        valid_event_times_c = [ valid_event_times[0] ]
         for n, pair in enumerate(valid_event_times[1:]):
             # self.Doc.print("\t%f - %f" % (pair[0], previous_pair[1]), True)
-            if pair[0] - previous_pair[1] < (5 * SAMPLING_FREQ):
+            earlier_pair = valid_event_times_c[-1]
+            if pair[0] - earlier_pair[1] < (5 * SAMPLING_FREQ):
                 # Replace the two pairs with a single combined pair
-                del valid_event_times_c[n] # n is already behind by one pos.
-                valid_event_times_c[n] = [ previous_pair[0], pair[1] ]
-            previous_pair = pair
+                del valid_event_times_c[-1]
+                valid_event_times_c.append([ earlier_pair[0], pair[1] ])
+            else:
+                valid_event_times_c.append(pair)
+
         self.Doc.print("\nAfter any merges:")
         for event_time in valid_event_times_c:
             self.Doc.print("\t%0.2f\t->\t%0.2f"
@@ -946,13 +950,12 @@ class SSRun(SingleRun):
                                                 method="nearest", tolerance=1)
             # tolerance is really (1/SAMPLING_FREQ)*SAMPLING_FREQ = 1
 
-            pair[0] = self.sync_df.index[new_start_i]
-
             new_end_i = self.sync_df.index.get_loc(pair[1] + 1*SAMPLING_FREQ,
                                                             method="nearest")
             # If file ends less than 1s after event ends, this will return
             # the last time in the file. No tolerance specified for this reason.
 
+            pair[0] = self.sync_df.index[new_start_i]
             pair[1] = self.sync_df.index[new_end_i]
 
         self.Doc.print("\nINCA times with 1-second buffers added:")
@@ -1212,10 +1215,11 @@ class DownhillRun(SingleRun):
                                | (self.sync_df["throttle"] < throttle_cr)   )
                                & (gs_rolling_avg > gspd_cr)
                                & (gs_rolling_slope > gs_slope_cr)     )
-       # NaNs in pedal channel treated as pedal up.
+        # NaNs in pedal channel treated as pedal up.
 
+        # Mask off every data point not meeting the filter criteria
         gs_rol_avg_mskd = gs_rolling_avg.mask(~downhill_filter)
-
+        # Convert to a list of indices.
         valid_times = gs_rol_avg_mskd[~gs_rol_avg_mskd.isna()]
 
         if len(valid_times) == 0:
@@ -1241,9 +1245,9 @@ class DownhillRun(SingleRun):
         cont_ranges.append(current_range)
 
         self.Doc.print("\nDownhill ranges (before imposing length req.):", True)
-        for event_time in cont_ranges:
+        for event_range in cont_ranges:
             self.Doc.print("\t%0.2f\t->\t%0.2f"
-               % (event_time[0] / SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ), True)
+               % (event_range[0] / SAMPLING_FREQ, event_range[1] / SAMPLING_FREQ), True)
 
         valid_ranges = []
         for range in cont_ranges:
@@ -1268,15 +1272,58 @@ class DownhillRun(SingleRun):
                 % (gs_slope_cr, gspd_cr, throttle_cr, gs_slope_t_cr))
 
         self.Doc.print("\nValid downhill ranges:")
-        for event_time in valid_ranges:
+        for event_range in valid_ranges:
             self.Doc.print("\t%0.2f\t->\t%0.2f"
-               % (event_time[0] / SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
+               % (event_range[0] / SAMPLING_FREQ, event_range[1] / SAMPLING_FREQ))
 
-
-        # Add buffers on each side - find closest point where ground speed <
-        # some threshold. Then add extra buffer to that?
+        # Add buffers on each side - find closest point where ground speed
+        # <1 mph. Add additional second beyond that.
         # Could do this with another filter. Then find closest val in filtered
         # list. Bias down for first range val, bias up for second.
+        slow_filter = (gs_rolling_avg < 1)
+
+        # Mask off every data point not meeting the filter criterion
+        gs_rol_avg_slow = gs_rolling_avg.mask(~slow_filter)
+        # Convert to a list of indices.
+        slow_times = gs_rol_avg_slow[~gs_rol_avg_slow.isna()]
+        self.slow_times = slow_times
+
+        # Now loop through event ranges and find "slow" times on either side
+        # of range to expand and give context to the event.
+        for n, event_range in enumerate(valid_ranges):
+            # Find closest neighbor value that is below 1 mph.
+            try:
+                new_start_i = slow_times.index[slow_times.index.get_loc(event_range[0], method="ffill")]
+            except KeyError:
+                # get_loc returns a KeyError if no value meeting our criteria
+                # exists between start point and start/end of file
+                new_start_i = 0
+
+            try:
+                new_end_i = slow_times.index[slow_times.index.get_loc(event_range[1], method="bfill")]
+                # new_end_i = slow_times[slow_times.index.get_loc(event_range[1], method="bfill")]
+            except KeyError:
+                new_end_i = len(self.sync_df.index)-1
+
+            # # Add additional one-sec buffers.
+            # if n == 0 and self.sync_df.index[new_start_i] <= (1 * SAMPLING_FREQ):
+            #     # Set zero as start value if first time is less than 1s.
+            #     new_start_i = 0
+            # else:
+            #     # Find closest neighbor value that is below 1 mph.
+            #     new_start_i = self.sync_df.index.get_loc(
+            #                 self.sync_df.index[new_start_i] - 1*SAMPLING_FREQ,
+            #                                     method="nearest", tolerance=1)
+            # # tolerance is really (1/SAMPLING_FREQ)*SAMPLING_FREQ = 1
+            #
+            # new_end_i = self.sync_df.index.get_loc(
+            #                 self.sync_df.index[new_end_i] + 1*SAMPLING_FREQ,
+            #                                                 method="nearest")
+            # # If file ends less than 1s after event ends, this will return
+            # # the last time in the file. No tolerance specified for this reason.
+
+            event_range[0] = self.sync_df.index[new_start_i]
+            event_range[1] = self.sync_df.index[new_end_i]
 
 
         self.Doc.print("\nAfter widening range to capture complete event(s):")
@@ -1284,6 +1331,25 @@ class DownhillRun(SingleRun):
             self.Doc.print("\t%0.2f\t->\t%0.2f"
                 % (event_time[0]/SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
 
+        # Make sure if two valid events are closer
+        # than 5s, don't cut into either one. Look at each pair of end/start
+        # points, and if they're closer than 5s, merge those two.
+        # This also handles cases where two or more ranges end up being
+        # identical after widening window to closest low-speed areas.
+        valid_ranges_c = [ valid_ranges[0] ]
+        for n, pair in enumerate(valid_ranges[1:]):
+            earlier_pair = valid_ranges_c[-1]
+            if pair[0] - earlier_pair[1] < (5 * SAMPLING_FREQ):
+                # Replace the two pairs with a single combined pair
+                del valid_ranges_c[-1]
+                valid_ranges_c.append([ earlier_pair[0], pair[1] ])
+            else:
+                valid_ranges_c.append(pair)
+
+        self.Doc.print("\nAfter any merges:")
+        for event_time in valid_ranges_c:
+            self.Doc.print("\t%0.2f\t->\t%0.2f"
+                % (event_time[0]/SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
 
         ax1 = plt.subplot(411)
         ax1.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gnd_speed"])
