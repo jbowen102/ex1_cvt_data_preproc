@@ -973,7 +973,8 @@ class SSRun(SingleRun):
 
             # shift time values to maintain continuity.
             shift = time_range[0] - desired_start_t
-            self.Doc.print("Shift (event %d): %.2f" % (n, shift / SAMPLING_FREQ))
+            self.Doc.print("Shift (event %d): %.2f" % (n, shift / SAMPLING_FREQ)
+                                                                         , True)
 
             self.shift_time_series(valid_event, offset_val=-shift)
 
@@ -984,6 +985,11 @@ class SSRun(SingleRun):
             # end time.
             desired_start_t = time_range[1]-shift
 
+        self.Doc.print("\nShifted ranges:")
+        for event in valid_events:
+            self.Doc.print("\t%0.2f\t->\t%0.2f"
+              % (event.index[0]/SAMPLING_FREQ, event.index[-1] / SAMPLING_FREQ))
+
         # Now re-assemble the DataFrame with only valid events.
         # https://pandas.pydata.org/pandas-docs/stable/user_guide/merging.html
         self.sync_df = pd.concat(valid_events)
@@ -992,8 +998,8 @@ class SSRun(SingleRun):
                                                     show_dimensions=True), True)
 
         self.Doc.print("\nData time span: %.2f -> %.2f (%d data points)" %
-               (self.sync_df.index[0]/SAMPLING_FREQ,
-                self.sync_df.index[-1]/SAMPLING_FREQ, len(self.sync_df.index)))
+          (self.sync_df.index[0]/SAMPLING_FREQ,
+                 self.sync_df.index[-1]/SAMPLING_FREQ, len(self.sync_df.index)))
 
     def add_math_channels(self):
         # This performs all the actions in the parent class's method
@@ -1305,26 +1311,8 @@ class DownhillRun(SingleRun):
             except KeyError:
                 new_end_i = len(self.sync_df.index)-1
 
-            # # Add additional one-sec buffers.
-            # if n == 0 and self.sync_df.index[new_start_i] <= (1 * SAMPLING_FREQ):
-            #     # Set zero as start value if first time is less than 1s.
-            #     new_start_i = 0
-            # else:
-            #     # Find closest neighbor value that is below 1 mph.
-            #     new_start_i = self.sync_df.index.get_loc(
-            #                 self.sync_df.index[new_start_i] - 1*SAMPLING_FREQ,
-            #                                     method="nearest", tolerance=1)
-            # # tolerance is really (1/SAMPLING_FREQ)*SAMPLING_FREQ = 1
-            #
-            # new_end_i = self.sync_df.index.get_loc(
-            #                 self.sync_df.index[new_end_i] + 1*SAMPLING_FREQ,
-            #                                                 method="nearest")
-            # # If file ends less than 1s after event ends, this will return
-            # # the last time in the file. No tolerance specified for this reason.
-
             event_range[0] = self.sync_df.index[new_start_i]
             event_range[1] = self.sync_df.index[new_end_i]
-
 
         self.Doc.print("\nAfter widening range to capture complete event(s):")
         for event_time in valid_ranges:
@@ -1350,6 +1338,44 @@ class DownhillRun(SingleRun):
         for event_time in valid_ranges_c:
             self.Doc.print("\t%0.2f\t->\t%0.2f"
                 % (event_time[0]/SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
+        self.Doc.print("\n")
+
+        # Split DataFrame into valid pieces; store in lists
+        valid_events = []
+        desired_start_t = 0
+        for n, time_range in enumerate(valid_ranges_c):
+            # create separate DataFrames for just this event
+            valid_event = self.sync_df[time_range[0]:time_range[1]]
+
+            # shift time values to maintain continuity.
+            shift = time_range[0] - desired_start_t
+            self.Doc.print("Shift (event %d): %.2f" % (n, shift / SAMPLING_FREQ)
+                                                                         , True)
+
+            self.shift_time_series(valid_event, offset_val=-shift)
+
+            # Add events to lists
+            valid_events.append(valid_event)
+
+            # define next start time to be next time value after new vector's
+            # end time.
+            desired_start_t = time_range[1]-shift
+
+        self.Doc.print("\nShifted ranges:")
+        for event in valid_events:
+            self.Doc.print("\t%0.2f\t->\t%0.2f"
+              % (event.index[0]/SAMPLING_FREQ, event.index[-1] / SAMPLING_FREQ))
+
+        # Now re-assemble the DataFrame with only valid events.
+        # https://pandas.pydata.org/pandas-docs/stable/user_guide/merging.html
+        self.sync_df = pd.concat(valid_events)
+        self.Doc.print("\nsync_df after abridgement:", True)
+        self.Doc.print(self.sync_df.to_string(max_rows=10, max_cols=7,
+                                                    show_dimensions=True), True)
+
+        self.Doc.print("\nData time span: %.2f -> %.2f (%d data points)" %
+          (self.sync_df.index[0]/SAMPLING_FREQ,
+                 self.sync_df.index[-1]/SAMPLING_FREQ, len(self.sync_df.index)))
 
         ax1 = plt.subplot(411)
         ax1.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gnd_speed"])
