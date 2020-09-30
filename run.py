@@ -175,7 +175,7 @@ class RunGroup(object):
                 # in later calls.
                 self.runs_to_process.pop(bad_run)
 
-    def plot_runs(self, overwrite=False, desc_str=None):
+    def plot_runs(self, overwrite=False, desc_str=""):
         # If only one run in group is to be processed, this will only loop once.
         if not self.runs_to_process:
             print("\nNo valid runs to plot.\n")
@@ -201,7 +201,7 @@ class RunGroup(object):
                 # in later calls.
                 self.runs_to_process.pop(bad_run)
 
-    def export_runs(self, overwrite=False, desc_str=None):
+    def export_runs(self, overwrite=False, desc_str=""):
         # If only one run in group is to be processed, this will only loop once.
         if not self.runs_to_process:
             print("\nNo valid runs to export.\n")
@@ -601,20 +601,22 @@ class SingleRun(object):
         self.abr_df["CVT_ratio_calc"] = self.math_df["cvt_ratio"].copy()
         CHANNEL_UNITS["CVT_ratio_calc"] = "rpm/rpm"
 
-    def plot_data(self, overwrite=False, description=None):
-        self.plot_abridge_compare(overwrite, description)
+    def plot_data(self, overwrite=False, description=""):
+        self.overwrite = overwrite
+        self.description = description
+        self.plot_abridge_compare()
 
-    def plot_abridge_compare(self, overwrite=False, description=None):
+    def plot_abridge_compare(self):
         # Implemented in child classes
         # Different version of this function in SSRun vs. DownhillRun
         pass
 
-    def export_plot(self, type, overwrite, description):
+    def export_plot(self, type):
         """Exports plot that's already been created with another method.
         Assumes caller method will clear figure afterward."""
-        if description:
+        if self.description:
             fig_filepath = ("%s/%s_%s-%s.png"
-                                % (PLOT_DIR, self.run_label, type, description))
+                            % (PLOT_DIR, self.run_label, type, self.description))
         else:
             fig_filepath = "%s/%s_%s.png" % (PLOT_DIR, self.run_label, type)
 
@@ -624,7 +626,7 @@ class SingleRun(object):
         wildcard_filename = (os.path.splitext(fig_filepath)[0]
                             + "-#" + "?"*short_hash_len
                             + os.path.splitext(fig_filepath)[1])
-        if glob.glob(wildcard_filename) and not overwrite:
+        if glob.glob(wildcard_filename) and not self.overwrite:
             ow_answer = ""
             while ow_answer.lower() not in ["y", "n"]:
                 ow_answer = input("\n%s already exists in figs folder. "
@@ -637,7 +639,7 @@ class SingleRun(object):
             if ow_answer.lower() == "n":
                 # plot will be cleared in caller function.
                 return
-        elif glob.glob(wildcard_filename) and overwrite:
+        elif glob.glob(wildcard_filename) and self.overwrite:
             for filepath in glob.glob(wildcard_filename):
                 os.remove(filepath)
 
@@ -654,7 +656,9 @@ class SingleRun(object):
         self.meta_str += ("Corresponding %s fig hash: '%s' | "
                                                             % (type, hash_text))
 
-    def export_data(self, overwrite=False, description=None):
+    def export_data(self, overwrite=False, description=""):
+        self.overwrite = overwrite
+        self.description = description
         export_df = self.abr_df.drop(columns=["time_raw_inca", "time_raw_edaq"])
         # https://stackoverflow.com/questions/29763620/how-to-select-all-columns-except-one-column-in-pandas
 
@@ -684,18 +688,18 @@ class SingleRun(object):
         sync_array.insert(0, header_rows[1])
         sync_array.insert(0, header_rows[0])
 
-        # Add metadata string (removing final unneded separator)
+        # Add metadata string
         sync_array.insert(0, [self.get_meta_str()])
 
-        if description:
-            sync_basename = "%s_Sync-%s.csv" % (self.run_label, description)
+        if self.description:
+            sync_basename = "%s_Sync-%s.csv" % (self.run_label, self.description)
         else:
             sync_basename = "%s_Sync.csv" % self.run_label
 
         sync_filename = "%s/%s" % (SYNC_DIR, sync_basename)
 
         # Check if file exists already. Prompt user for overwrite decision.
-        if os.path.exists(sync_filename) and not overwrite:
+        if os.path.exists(sync_filename) and not self.overwrite:
             ow_answer = ""
             while ow_answer.lower() not in ["y", "n"]:
                 ow_answer = input("\n%s already exists in sync_data folder. "
@@ -720,6 +724,7 @@ class SingleRun(object):
         return self.INCA_filename
 
     def get_meta_str(self):
+        # Removing trailing delimiter
         return self.meta_str[:-3]
 
     def get_output(self):
@@ -1088,12 +1093,12 @@ class SSRun(SingleRun):
         # https://towardsdatascience.com/regression-plots-with-pandas-and-numpy-faf2edbfad4f
         # https://data36.com/linear-regression-in-python-numpy-polyfit/
 
-    def plot_data(self, overwrite=False, description=None):
+    def plot_data(self, overwrite=False, description=""):
         # This performs all the actions in the parent class's method
         super(SSRun, self).plot_data(overwrite, description)
-        self.plot_ss_range(overwrite, description)
+        self.plot_ss_range()
 
-    def plot_abridge_compare(self, overwrite=False, description=None):
+    def plot_abridge_compare(self):
         ax1 = plt.subplot(211)
         # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
         color = "tab:blue"
@@ -1143,11 +1148,11 @@ class SSRun(SingleRun):
 
         # plt.show() # can't use w/ WSL. Export instead.
         # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
-        self.export_plot("abr", overwrite, description)
+        self.export_plot("abr")
         plt.clf()
         # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
 
-    def plot_ss_range(self, overwrite=False, description=None):
+    def plot_ss_range(self):
         ax1 = plt.subplot(311)
         plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["gnd_speed"],
                                                         label="Ground Speed")
@@ -1184,7 +1189,7 @@ class SSRun(SingleRun):
 
         # plt.show() # can't use w/ WSL.
         # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
-        self.export_plot("ss", overwrite, description)
+        self.export_plot("ss")
         plt.clf()
         # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
 
@@ -1213,7 +1218,7 @@ class DownhillRun(SingleRun):
         gs_slope_cr = +1.0  # mph/s.
         # Ground-speed slope min criterion to identify increasing speed downhill.
         gs_slope_t_cr = 3.0 # seconds. Continuous amount of time the slope
-                            # criterion must be met to
+                            # criterion must be met to keep event.
         throttle_cr = 5.0 # deg. Anything below this interpreted as closed throt.
 
         # Create rolling average of ground speed (unabridged data).
@@ -1308,7 +1313,7 @@ class DownhillRun(SingleRun):
         # <1 mph. Add additional second beyond that.
         # Could do this with another filter. Then find closest val in filtered
         # list. Bias down for first range val, bias up for second.
-        slow_filter = (gs_rolling_avg < 1)
+        slow_filter = (gs_rolling_avg < 1) # mph
 
         # Mask off every data point not meeting the filter criterion
         gs_rol_avg_slow = gs_rolling_avg.mask(~slow_filter)
@@ -1406,19 +1411,19 @@ class DownhillRun(SingleRun):
 
     def add_math_channels(self):
         # This performs all the actions in the parent class's method
-        pass
         super(DownhillRun, self).add_math_channels()
         self.add_downhill_avgs()
 
     def add_downhill_avgs(self):
         pass
 
-    def plot_data(self, overwrite=False, description=None):
+    def plot_data(self, overwrite=False, description=""):
         # This performs all the actions in the parent class's method
         super(DownhillRun, self).plot_data(overwrite, description)
-        self.plot_downhill_slope(overwrite, description)
+        self.plot_downhill_slope()
+        self.plot_cvt_ratio()
 
-    def plot_abridge_compare(self, overwrite=False, description=None):
+    def plot_abridge_compare(self):
         ax1 = plt.subplot(211)
         # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
         plt.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gnd_speed"])
@@ -1444,33 +1449,13 @@ class DownhillRun(SingleRun):
         ax2.set_ylabel("Speed (mph)")
         # plt.setp(ax2.get_xticklabels(), visible=False) # x labels only on bottom
 
-        # ax3 = plt.subplot(313, sharex=ax1)
-        # # Convert DF indices from hundredths of a second to seconds
-        # # abr_time_series = [round(ti/SAMPLING_FREQ, 2)
-        # #                                         for ti in self.abr_df.index]
-        # # color = "tab:red"
-        # # ax3.set_ylabel("Engine speed (rpm)")
-        # # plt.plot(self.raw_edaq_df.index, self.raw_edaq_df["pedal_sw"], color=color)
-        # #
-        # # ax4 = ax3.twinx() # second plot on same x axis
-        # # color = "tab:blue"
-        # # plt.plot(self.raw_inca_df.index, self.raw_inca_df["pedal_sw"], color=color)
-        #
-        # # plt.plot(sync_time_series, self.sync_df["gnd_speed"])
-        # # plt.plot(sync_time_series, self.abr_gs_rol_avg)
-        # # plt.plot(sync_time_series, self.abr_gs_rol_avg_mskd)
-        #
-        # ax3.set_xlabel("Time (s)")
-        # # https://matplotlib.org/3.2.1/gallery/subplots_axes_and_figures/shared_axis_demo.html#sphx-glr-gallery-subplots-axes-and-figures-shared-axis-demo-py
-        # ax3.set_ylabel("Speed (mph)")
-
         # plt.show() # can't use w/ WSL. Export instead.
         # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
-        self.export_plot("abr", overwrite, description)
+        self.export_plot("abr")
         plt.clf()
         # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
 
-    def plot_downhill_slope(self, overwrite=False, description=None):
+    def plot_downhill_slope(self):
         """Plot with downhill segments identified."""
         ax1 = plt.subplot(411)
         color = "k"
@@ -1498,10 +1483,13 @@ class DownhillRun(SingleRun):
         ax4.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["throttle"])
         ax4.set_ylabel("Throttle (deg)")
 
-        self.export_plot("downhill", overwrite, description)
+        self.export_plot("downhill")
         # fig_filepath = "%s/%s_%s.png" % (PLOT_DIR, self.run_label, "downhill")
         # plt.savefig(fig_filepath)
         plt.clf()
+
+    def plot_cvt_ratio(self):
+        pass
 
     def get_run_type(self):
         return "DownhillRun"
