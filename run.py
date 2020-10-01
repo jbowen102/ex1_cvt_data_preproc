@@ -576,7 +576,6 @@ class SingleRun(object):
     def add_math_channels(self):
         self.math_df = pd.DataFrame(index=self.abr_df.index)
         # https://stackoverflow.com/questions/18176933/create-an-empty-data-frame-with-index-from-another-data-frame
-        self.add_cvt_ratio()
 
     def add_cvt_ratio(self):
         ROLLING_RADIUS_FACTOR = 0.965
@@ -966,6 +965,7 @@ class SSRun(SingleRun):
     def add_math_channels(self):
         # This performs all the actions in the parent class's method
         super(SSRun, self).add_math_channels()
+        self.add_cvt_ratio()
         self.add_ss_avgs()
 
     def add_ss_avgs(self):
@@ -1241,6 +1241,7 @@ class DownhillRun(SingleRun):
 
         # Mask off every data point not meeting the filter criteria
         gs_rol_avg_mskd = gs_rolling_avg.mask(~downhill_filter)
+        gs_rol_slope_mskd = gs_rolling_slope.mask(~downhill_filter)
         # Convert to a list of indices.
         valid_times = gs_rol_avg_mskd[~gs_rol_avg_mskd.isna()]
 
@@ -1373,6 +1374,8 @@ class DownhillRun(SingleRun):
         # Piggyback on sync_df for now.
         self.sync_df["gs_rolling_avg"] = gs_rolling_avg
         self.sync_df["gs_rol_avg_mskd"] = gs_rol_avg_mskd
+        self.sync_df["gs_rolling_slope"] = gs_rolling_slope
+        self.sync_df["gs_rol_slope_mskd"] = gs_rol_slope_mskd
         desired_start_t = 0
         for n, time_range in enumerate(valid_ranges_c):
             # create separate DataFrames for just this event
@@ -1412,6 +1415,17 @@ class DownhillRun(SingleRun):
     def add_math_channels(self):
         # This performs all the actions in the parent class's method
         super(DownhillRun, self).add_math_channels()
+        # Move rolling channels calculated during abridge to the math_df.
+        self.math_df["gs_rolling_avg"] = self.abr_df["gs_rolling_avg"]
+        self.math_df["gs_rol_avg_mskd"] = self.abr_df["gs_rol_avg_mskd"]
+        self.math_df["gs_rolling_slope"] = self.abr_df["gs_rolling_slope"]
+        self.math_df["gs_rol_slope_mskd"] = self.abr_df["gs_rol_slope_mskd"]
+        del self.abr_df["gs_rolling_avg"]
+        del self.abr_df["gs_rol_avg_mskd"]
+        del self.abr_df["gs_rolling_slope"]
+        del self.abr_df["gs_rol_slope_mskd"]
+
+        self.add_cvt_ratio()
         self.add_downhill_avgs()
 
     def add_downhill_avgs(self):
@@ -1439,12 +1453,8 @@ class DownhillRun(SingleRun):
         # plt.plot(self.sync_df.index, self.sync_df["engine_spd"])
 
         plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["gnd_speed"])
-        plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["gs_rolling_avg"])
-        plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["gs_rol_avg_mskd"])
-
-        # Remove rolling-avg channels added earlier.
-        del self.abr_df["gs_rolling_avg"]
-        del self.abr_df["gs_rol_avg_mskd"]
+        plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["gs_rolling_avg"])
+        plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["gs_rol_avg_mskd"])
 
         ax2.set_ylabel("Speed (mph)")
         # plt.setp(ax2.get_xticklabels(), visible=False) # x labels only on bottom
