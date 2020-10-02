@@ -592,12 +592,27 @@ class SingleRun(object):
         self.math_df["cvt_ratio"] = (self.abr_df["engine_spd"]
                                         / self.math_df["input_shaft_ang_spd"])
 
-        # # Remove any values that are zero or > 5 (including infinite).
-        self.math_df["cvt_ratio"].mask((self.math_df["cvt_ratio"] > 5)
-            | (self.math_df["cvt_ratio"] == 0), inplace=True)  # replaces w/ NaN
+        if self.get_run_type() == "DownhillRun":
+            gnd_spd_in_min_fil = self.math_df["gs_rolling_avg"] * 5280 * 12/60 # inches/min
+            tire_ang_spd_fil = gnd_spd_in_min_fil / tire_circ
+            input_shaft_ang_spd_fil = tire_ang_spd_fil * AXLE_RATIO * GEARBOX_RATIO
+
+            self.math_df["cvt_ratio_smoothed"] = (self.abr_df["engine_spd"]
+                                            / input_shaft_ang_spd_fil)
+
+            # Remove any values that are zero or > 5 (including infinite).
+            self.math_df["cvt_ratio_mskd"] = self.math_df["cvt_ratio_smoothed"].mask(
+                (self.math_df["cvt_ratio_smoothed"] > 5) | (self.math_df["cvt_ratio_smoothed"] == 0))
+            # Also apply the downhill filter
+            self.math_df["cvt_ratio_mskd"] = self.math_df["cvt_ratio_mskd"].mask(~self.math_df["downhill_filter"])
+
+        else:
+            # # Remove any values that are zero or > 5 (including infinite).
+            self.math_df["cvt_ratio_mskd"] = self.math_df["cvt_ratio"].mask(
+                (self.math_df["cvt_ratio"] > 5) | (self.math_df["cvt_ratio"] == 0))
 
         # Transcribe to main DF for export
-        self.abr_df["CVT_ratio_calc"] = self.math_df["cvt_ratio"].copy()
+        self.abr_df["CVT_ratio_calc"] = self.math_df["cvt_ratio_mskd"].copy()
         CHANNEL_UNITS["CVT_ratio_calc"] = "rpm/rpm"
 
     def plot_data(self, overwrite=False, description=""):
@@ -628,9 +643,9 @@ class SingleRun(object):
         if glob.glob(wildcard_filename) and not self.overwrite:
             ow_answer = ""
             while ow_answer.lower() not in ["y", "n"]:
-                ow_answer = input("\n%s already exists in figs folder. "
-                                  "Overwrite? (Y/N)\n> "
+                self.Doc.print("\n%s already exists in figs folder. Overwrite? (Y/N)"
                                         % os.path.basename(wildcard_filename))
+                ow_answer = input("> ")
             if ow_answer.lower() == "y":
                 for filepath in glob.glob(wildcard_filename):
                     os.remove(filepath)
@@ -701,8 +716,9 @@ class SingleRun(object):
         if os.path.exists(sync_filename) and not self.overwrite:
             ow_answer = ""
             while ow_answer.lower() not in ["y", "n"]:
-                ow_answer = input("\n%s already exists in sync_data folder. "
-                                    "Overwrite? (Y/N)\n> " % sync_basename)
+                self.Doc.print("\n%s already exists in sync_data folder. Overwrite? (Y/N)"
+                                                            % sync_basename)
+                ow_answer = input("> ")
             if ow_answer.lower() == "n":
                 return
 
@@ -865,10 +881,10 @@ class SSRun(SingleRun):
         if not valid_event_times:
             # If no times were stored, then alert user but continue with
             # program.
-            input("\nNo valid pedal-down events found in run %s (Criteria: "
-            "throttle >%d deg for >%ds total).\nPress Enter to acknowledge and "
-            "continue processing data without abridging."
+            self.Doc.print("\nNo valid pedal-down events found in run %s "
+                                "(Criteria: throttle >%d deg for >%ds total)."
                     % (self.run_label, self.THRTL_THRESH, self.THRTL_T_THRESH))
+            input("Press Enter to acknowledge and continue processing data without abridging.")
             return
         else:
             # Document in output file
@@ -1233,10 +1249,10 @@ class DownhillRun(SingleRun):
 
         # Apply pedal, throttle, speed, and speed slope criteria to isolate
         # downhill, pedal-up events.
-        downhill_filter = (   (  (self.sync_df["pedal_sw"].isna())
-                               | (self.sync_df["throttle"] < throttle_cr)   )
-                               & (gs_rolling_avg > gspd_cr)
-                               & (gs_rolling_slope > gs_slope_cr)     )
+        downhill_filter = (  (  (self.sync_df["pedal_sw"].isna())
+                                 | (self.sync_df["throttle"] < throttle_cr)  )
+                              & (gs_rolling_avg > gspd_cr)
+                              & (gs_rolling_slope > gs_slope_cr)     )
         # NaNs in pedal channel treated as pedal up.
 
         # Mask off every data point not meeting the filter criteria
@@ -1248,13 +1264,14 @@ class DownhillRun(SingleRun):
         if len(valid_times) == 0:
             # If no times were stored, then alert user but continue with
             # program.
-            input("\nNo valid downhill events found in run %s (Criterion: "
-            "throttle <%ddeg and speed slope >%d mph/s for >%ds).\n"
-            "Press Enter to acknowledge and continue processing data without abridging."
-                    % (self.run_label, throttle_cr, gs_slope_cr, gs_slope_t_cr))
+            self.Doc.print("\nNo valid downhill events found in run %s (Criteria: "
+            "speed slope >%d mph/s, speed >%d mph, and throttle <%d deg).\n"
+                % (self.run_label, gs_slope_cr, gspd_cr, throttle_cr))
+            input("Press Enter to acknowledge and continue processing data without abridging.")
             # Take care of needed assignments that are typically down below.
             self.sync_df["gs_rolling_avg"] = gs_rolling_avg
-            self.sync_df["gs_rol_avg_mskd"] = gs_rol_avg_mskd
+            self.sync_df["gs_rolling_slope"] = gs_rolling_slope
+            self.sync_df["downhill_filter"] = downhill_filter
             self.abr_df = self.sync_df.copy(deep=True)
             return
 
@@ -1287,10 +1304,10 @@ class DownhillRun(SingleRun):
         if not valid_ranges:
             # If no times were stored, then alert user but continue with
             # program.
-            input("\nNo valid downhill events found in run %s (Criteria: "
+            self.Doc.print("\nNo valid downhill events found in run %s (Criterion: "
             "speed slope >%d mph/s, speed >%d mph, and throttle <%d deg for >%ds).\n"
-            "Press Enter to acknowledge and continue processing data without abridging."
-            % (self.run_label, gs_slope_cr, gspd_cr, throttle_cr, gs_slope_t_cr))
+                % (self.run_label, gs_slope_cr, gspd_cr, throttle_cr, gs_slope_t_cr))
+            input("Press Enter to acknowledge and continue processing data without abridging.")
             return
         else:
             # Document in output file
@@ -1373,9 +1390,8 @@ class DownhillRun(SingleRun):
         # Cut up and re-join rolling avg channels too for later use.
         # Piggyback on sync_df for now.
         self.sync_df["gs_rolling_avg"] = gs_rolling_avg
-        self.sync_df["gs_rol_avg_mskd"] = gs_rol_avg_mskd
         self.sync_df["gs_rolling_slope"] = gs_rolling_slope
-        self.sync_df["gs_rol_slope_mskd"] = gs_rol_slope_mskd
+        self.sync_df["downhill_filter"] = downhill_filter
         desired_start_t = 0
         for n, time_range in enumerate(valid_ranges_c):
             # create separate DataFrames for just this event
@@ -1417,13 +1433,11 @@ class DownhillRun(SingleRun):
         super(DownhillRun, self).add_math_channels()
         # Move rolling channels calculated during abridge to the math_df.
         self.math_df["gs_rolling_avg"] = self.abr_df["gs_rolling_avg"]
-        self.math_df["gs_rol_avg_mskd"] = self.abr_df["gs_rol_avg_mskd"]
         self.math_df["gs_rolling_slope"] = self.abr_df["gs_rolling_slope"]
-        self.math_df["gs_rol_slope_mskd"] = self.abr_df["gs_rol_slope_mskd"]
+        self.math_df["downhill_filter"] = self.abr_df["downhill_filter"]
         del self.abr_df["gs_rolling_avg"]
-        del self.abr_df["gs_rol_avg_mskd"]
         del self.abr_df["gs_rolling_slope"]
-        del self.abr_df["gs_rol_slope_mskd"]
+        del self.abr_df["downhill_filter"]
 
         self.add_cvt_ratio()
         self.add_downhill_avgs()
@@ -1442,7 +1456,8 @@ class DownhillRun(SingleRun):
         # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
         plt.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gnd_speed"])
         plt.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gs_rolling_avg"])
-        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gs_rol_avg_mskd"])
+        plt.plot(self.sync_df.index/SAMPLING_FREQ,
+            self.sync_df["gs_rolling_avg"].mask(~self.sync_df["downhill_filter"]))
 
         plt.title("Ground Speed vs. Time (Run %s)" % self.run_label)
         ax1.set_ylabel("Speed (mph)")
@@ -1450,14 +1465,13 @@ class DownhillRun(SingleRun):
         plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
 
         ax2 = plt.subplot(212, sharex=ax1)
-        # plt.plot(self.sync_df.index, self.sync_df["engine_spd"])
 
         plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["gnd_speed"])
         plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["gs_rolling_avg"])
-        plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["gs_rol_avg_mskd"])
+        plt.plot(self.math_df.index/SAMPLING_FREQ,
+            self.math_df["gs_rolling_avg"].mask(~self.math_df["downhill_filter"]))
 
         ax2.set_ylabel("Speed (mph)")
-        # plt.setp(ax2.get_xticklabels(), visible=False) # x labels only on bottom
 
         # plt.show() # can't use w/ WSL. Export instead.
         # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
@@ -1474,7 +1488,8 @@ class DownhillRun(SingleRun):
         color = "c"
         ax1.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gs_rolling_avg"], color=color)
         color = "r"
-        ax1.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gs_rol_avg_mskd"], color=color)
+        ax1.plot(self.sync_df.index/SAMPLING_FREQ,
+            self.sync_df["gs_rolling_avg"].mask(~self.sync_df["downhill_filter"]), color=color)
         ax1.set_ylabel("Speed (mph)")
         plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
         plt.title("Downhill Segments (Run %s)" % self.run_label)
@@ -1499,7 +1514,38 @@ class DownhillRun(SingleRun):
         plt.clf()
 
     def plot_cvt_ratio(self):
-        pass
+        # Plot vehicle speed, filtered speed, engine speed, CVT ratio
+        ax1 = plt.subplot(311)
+        # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
+        plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["gnd_speed"])
+        plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["gs_rolling_avg"])
+        plt.plot(self.math_df.index/SAMPLING_FREQ,
+            self.math_df["gs_rolling_avg"].mask(~self.math_df["downhill_filter"]))
+        ax1.set_ylabel("Speed (mph)")
+
+        plt.title("CVT Ratio (Run %s)" % self.run_label)
+        plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
+
+        ax2 = plt.subplot(312, sharex=ax1)
+
+        plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["engine_spd"])
+        ax2.set_ylabel("Engine Speed (mph)")
+
+        ax3 = plt.subplot(313, sharex=ax1)
+
+        plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["cvt_ratio_smoothed"],
+                                                            color="lightgrey")
+        plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["cvt_ratio_mskd"],
+                                                            color="tab:blue")
+        ax3.set_ylabel("CVT Ratio Calc")
+        ax3.set_ylim([0, 4])
+        ax3.set_yticks([0, 1, 2, 3, 4])
+
+        # plt.show() # can't use w/ WSL. Export instead.
+        # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
+        self.export_plot("cvt")
+        plt.clf()
+        # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
 
     def get_run_type(self):
         return "DownhillRun"
