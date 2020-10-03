@@ -15,6 +15,7 @@ from PIL import Image
 import hashlib
 import glob
 from tqdm import tqdm
+import copy
 
 try:
     import matplotlib
@@ -573,8 +574,9 @@ class SingleRun(object):
         pass
 
     def add_math_channels(self):
-        self.math_df = pd.DataFrame(index=self.abr_df.index)
-        # https://stackoverflow.com/questions/18176933/create-an-empty-data-frame-with-index-from-another-data-frame
+        # Implemented in child classes
+        # Different version of this function in SSRun vs. DownhillRun
+        pass
 
     def add_cvt_ratio(self):
         ROLLING_RADIUS_FACTOR = 0.965
@@ -607,6 +609,7 @@ class SingleRun(object):
     def plot_data(self, overwrite=False, description=""):
         self.overwrite = overwrite
         self.description = description
+        self.Doc.print("\n")
         self.plot_abridge_compare()
         self.plot_cvt_ratio()
 
@@ -619,15 +622,27 @@ class SingleRun(object):
         # Plot vehicle speed, filtered speed, engine speed, CVT ratio
         ax1 = plt.subplot(311)
         # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
-        if self.get_run_type() == "SSRun":
-            # plot average for steady-state run
-            ax1.axhline(self.math_df.at[0, "SS_gnd_spd_avg"], color="lightcoral")
+
         plt.plot(self.math_df.index/SAMPLING_FREQ,
-                 self.math_df["gs_rolling_avg"], color="lightgrey")
+                 self.math_df["gs_rolling_avg"], color="lightgrey", zorder=2)
         plt.plot(self.math_df.index/SAMPLING_FREQ,
-                 self.math_df["gs_rol_avg_mskd"], color="r")
+                 self.math_df["gs_rol_avg_mskd"], color="r", zorder=3)
         ax1.set_ylabel("Speed (mph)")
 
+        if self.get_run_type() == "SSRun":
+            # plot average for steady-state run
+            ax1.axhline(self.math_df.at[0, "SS_gnd_spd_avg"],
+                                                   color="lightcoral", zorder=1)
+        elif self.get_run_type() == "DownhillRun":
+            # Plot slopes for downhill run
+            # Restore existing y-axis limits after adding slopes because slopes
+            # may extend beyond optimal window limits.
+            ylims = ax1.get_ylim()
+            plt.plot(self.math_df.index/SAMPLING_FREQ,
+                    self.math_df["trendlines"], color="lightcoral", zorder=1, scaley=False)
+            ax1.set_ylim(ylims)
+            # https://stackoverflow.com/questions/7386872/make-matplotlib-autoscaling-ignore-some-of-the-plots
+            # https://matplotlib.org/3.1.1/gallery/misc/zorder_demo.html
         plt.title("CVT Ratio (Run %s)" % self.run_label)
         plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
 
@@ -640,24 +655,25 @@ class SingleRun(object):
             es_rolling_avg = self.abr_df["engine_spd"]
             engine_spd_mskd = self.abr_df["engine_spd"].mask(~self.math_df["downhill_filter"])
 
+        plt.plot(self.abr_df.index/SAMPLING_FREQ, es_rolling_avg, color="lightgrey", zorder=2)
+        plt.plot(self.abr_df.index/SAMPLING_FREQ, engine_spd_mskd, color="tab:blue", zorder=3)
         if self.get_run_type() == "SSRun":
             # plot average for steady-state run
-            ax2.axhline(self.math_df.at[0, "SS_eng_spd_avg"], color="lightsteelblue")
-        plt.plot(self.abr_df.index/SAMPLING_FREQ, es_rolling_avg, color="lightgrey")
-        plt.plot(self.abr_df.index/SAMPLING_FREQ, engine_spd_mskd, color="tab:blue")
+            ax2.axhline(self.math_df.at[0, "SS_eng_spd_avg"], color="lightsteelblue", zorder=1)
         ax2.set_ylabel("Engine Speed (mph)")
 
         plt.setp(ax2.get_xticklabels(), visible=False) # x labels only on bottom
 
         ax3 = plt.subplot(313, sharex=ax1)
 
+        plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["cvt_ratio"],
+                                                    color="lightgrey", zorder=2)
+        plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["cvt_ratio_mskd"],
+                                                    color="tab:green", zorder=3)
         if self.get_run_type() == "SSRun":
             # plot average for steady-state run
-            ax3.axhline(self.math_df.at[0, "SS_cvt_ratio_avg"], color="lightgreen")
-        plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["cvt_ratio"],
-                                                            color="lightgrey")
-        plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["cvt_ratio_mskd"],
-                                                            color="tab:green")
+            ax3.axhline(self.math_df.at[0, "SS_cvt_ratio_avg"],
+                                                   color="lightgreen", zorder=1)
         ax3.set_ylabel("CVT Ratio Calc")
         ax3.set_ylim([-0.2, 4])
         ax3.set_yticks([0, 1, 2, 3, 4])
@@ -709,7 +725,7 @@ class SingleRun(object):
         fig_filepath_hash = (os.path.splitext(fig_filepath)[0] + "-#"
                                 + hash_text + os.path.splitext(fig_filepath)[1])
         os.rename(fig_filepath, fig_filepath_hash)
-        self.Doc.print("\nExported plot as %s." % fig_filepath_hash)
+        self.Doc.print("Exported plot as %s." % fig_filepath_hash)
         self.meta_str += ("Corresponding %s fig hash: '%s' | "
                                                             % (type, hash_text))
 
@@ -928,6 +944,7 @@ class SSRun(SingleRun):
                                 "(Criteria: throttle >%d deg for >%ds total)."
                     % (self.run_label, self.THRTL_THRESH, self.THRTL_T_THRESH))
             input("Press Enter to acknowledge and continue processing data without abridging.")
+            self.abr_df = self.sync_df.copy(deep=True)
             return
         else:
             # Document in output file
@@ -1022,8 +1039,8 @@ class SSRun(SingleRun):
                  self.abr_df.index[-1]/SAMPLING_FREQ, len(self.abr_df.index)))
 
     def add_math_channels(self):
-        # This performs all the actions in the parent class's method
-        super(SSRun, self).add_math_channels()
+        self.math_df = pd.DataFrame(index=self.abr_df.index)
+        # https://stackoverflow.com/questions/18176933/create-an-empty-data-frame-with-index-from-another-data-frame
         self.add_cvt_ratio()
         self.add_ss_avgs()
 
@@ -1322,6 +1339,8 @@ class DownhillRun(SingleRun):
             self.sync_df["gs_rolling_avg"] = gs_rolling_avg
             self.sync_df["gs_rolling_slope"] = gs_rolling_slope
             self.sync_df["downhill_filter"] = downhill_filter
+            self.sync_df["trendlines"] = np.nan
+            self.sync_df["slopes"] = np.nan
             self.abr_df = self.sync_df.copy(deep=True)
             return
 
@@ -1344,20 +1363,29 @@ class DownhillRun(SingleRun):
             self.Doc.print("\t%0.2f\t->\t%0.2f"
                % (event_range[0] / SAMPLING_FREQ, event_range[1] / SAMPLING_FREQ), True)
 
-        valid_ranges = []
+        valid_slopes = []
         for range in cont_ranges:
             if range[1]-range[0] > gs_slope_t_cr*SAMPLING_FREQ:
                 # Must have > gs_slope_t_cr seconds to count.
-                valid_ranges.append(range)
+                valid_slopes.append(range)
                 # print(range[1]-range[0])
+            else:
+                pass
+                # Remove from downhill_filter
 
-        if not valid_ranges:
+        if not valid_slopes:
             # If no times were stored, then alert user but continue with
             # program.
             self.Doc.print("\nNo valid downhill events found in run %s (Criterion: "
             "speed slope >%d mph/s, speed >%d mph, and throttle <%d deg for >%ds).\n"
                 % (self.run_label, gs_slope_cr, gspd_cr, throttle_cr, gs_slope_t_cr))
             input("Press Enter to acknowledge and continue processing data without abridging.")
+            self.sync_df["gs_rolling_avg"] = gs_rolling_avg
+            self.sync_df["gs_rolling_slope"] = gs_rolling_slope
+            self.sync_df["downhill_filter"] = downhill_filter
+            self.sync_df["trendlines"] = np.nan
+            self.sync_df["slopes"] = np.nan
+            self.abr_df = self.sync_df.copy(deep=True)
             return
         else:
             # Document in output file
@@ -1371,11 +1399,6 @@ class DownhillRun(SingleRun):
         self.meta_str += ("Isolation and downhill calc rolling window sizes: "
                                                 "%d for avg, %d for slope | "
                                             % (win_size_avg, win_size_slope))
-
-        self.Doc.print("\nValid downhill ranges:")
-        for event_range in valid_ranges:
-            self.Doc.print("\t%0.2f\t->\t%0.2f"
-               % (event_range[0] / SAMPLING_FREQ, event_range[1] / SAMPLING_FREQ))
 
         # Add buffers on each side - find closest point where ground speed
         # <1 mph. Add additional second beyond that.
@@ -1391,6 +1414,10 @@ class DownhillRun(SingleRun):
 
         # Now loop through event ranges and find "slow" times on either side
         # of range to expand and give context to the event.
+        valid_ranges = copy.deepcopy(valid_slopes)
+        # When copying list of lists, the contained lists are aliased w/
+        # typical list-copy methods like [:] or .copy().
+        # https://stackoverflow.com/questions/2612802/list-changes-unexpectedly-after-assignment-how-do-i-clone-or-copy-it-to-prevent
         for n, event_range in enumerate(valid_ranges):
             # Find closest neighbor value that is below 1 mph.
             try:
@@ -1408,6 +1435,34 @@ class DownhillRun(SingleRun):
 
             event_range[0] = self.sync_df.index[new_start_i]
             event_range[1] = self.sync_df.index[new_end_i]
+
+        # Create overall regression curve (not rolling) for each valid range.
+        # Store for later plotting.
+        trendlines = pd.Series(np.nan, index=self.sync_df.index)
+        slopes = pd.Series(np.nan, index=self.sync_df.index)
+        last_end_i = 0
+        self.Doc.print("\nValid downhill ranges:")
+        for n, event_range in enumerate(valid_slopes):
+            # Input each event range's gs_rolling_avg values into np.polyval
+            # Put them in new column. Everywhere else is NaN.
+            coeff = np.polyfit(self.sync_df.index[event_range[0]:event_range[1]]/SAMPLING_FREQ,
+                               gs_rolling_avg[event_range[0]:event_range[1]], 1)
+            poly_fxn = np.poly1d(coeff)
+            # https://stackoverflow.com/questions/26447191/how-to-add-trendline-in-python-matplotlib-dot-scatter-graphs
+
+            # Use broader range for trendline plotting so each appears extended
+            # in plot used later.
+            trendlines[valid_ranges[n][0]:valid_ranges[n][1]-1] = poly_fxn(
+                self.sync_df.index[valid_ranges[n][0]:valid_ranges[n][1]-1]/SAMPLING_FREQ)
+            # Subtracting one to end index to maintain a NaN between slopes,
+            # else plot would draw line joining them.
+
+            # Store slope value itself for later retrieval. This time in the precise window
+            slopes[event_range[0]:event_range[1]] = coeff[0]
+
+            self.Doc.print("\t%0.2f\t->\t%0.2f\t|    Slope: %+0.2f mph/s"
+              % (event_range[0] / SAMPLING_FREQ, event_range[1] / SAMPLING_FREQ,
+                  coeff[0]))
 
         self.Doc.print("\nAfter widening range to capture complete event(s):")
         for event_time in valid_ranges:
@@ -1442,6 +1497,8 @@ class DownhillRun(SingleRun):
         self.sync_df["gs_rolling_avg"] = gs_rolling_avg
         self.sync_df["gs_rolling_slope"] = gs_rolling_slope
         self.sync_df["downhill_filter"] = downhill_filter
+        self.sync_df["trendlines"] = trendlines
+        self.sync_df["slopes"] = slopes
         desired_start_t = 0
         for n, time_range in enumerate(valid_ranges_c):
             # create separate DataFrames for just this event
@@ -1467,6 +1524,7 @@ class DownhillRun(SingleRun):
               % (event.index[0]/SAMPLING_FREQ, event.index[-1] / SAMPLING_FREQ))
 
         # Now re-assemble the DataFrame with only valid events.
+        # Carries over rolling and filter channels added to sync_df above.
         # https://pandas.pydata.org/pandas-docs/stable/user_guide/merging.html
         self.abr_df = pd.concat(valid_events)
 
@@ -1479,15 +1537,20 @@ class DownhillRun(SingleRun):
                  self.abr_df.index[-1]/SAMPLING_FREQ, len(self.abr_df.index)))
 
     def add_math_channels(self):
-        # This performs all the actions in the parent class's method
-        super(DownhillRun, self).add_math_channels()
-        # Move rolling channels calculated during abridge to the math_df.
+        self.math_df = pd.DataFrame(index=self.abr_df.index)
+        # https://stackoverflow.com/questions/18176933/create-an-empty-data-frame-with-index-from-another-data-frame
+
+        # Move channels calculated during abridge to the math_df.
         self.math_df["gs_rolling_avg"] = self.abr_df["gs_rolling_avg"]
         self.math_df["gs_rolling_slope"] = self.abr_df["gs_rolling_slope"]
         self.math_df["downhill_filter"] = self.abr_df["downhill_filter"]
+        self.math_df["trendlines"] = self.abr_df["trendlines"]
+        self.math_df["slopes"] = self.abr_df["slopes"]
         del self.abr_df["gs_rolling_avg"]
         del self.abr_df["gs_rolling_slope"]
         del self.abr_df["downhill_filter"]
+        del self.abr_df["trendlines"]
+        del self.abr_df["slopes"]
 
         self.add_cvt_ratio()
         self.add_downhill_avgs()
@@ -1544,7 +1607,7 @@ class DownhillRun(SingleRun):
     def plot_data(self, overwrite=False, description=""):
         # This performs all the actions in the parent class's method
         super(DownhillRun, self).plot_data(overwrite, description)
-        self.plot_downhill_slope()
+        self.plot_downhill_range()
 
     def plot_abridge_compare(self):
         ax1 = plt.subplot(211)
@@ -1573,7 +1636,7 @@ class DownhillRun(SingleRun):
         plt.clf()
         # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
 
-    def plot_downhill_slope(self):
+    def plot_downhill_range(self):
         """Plot with downhill segments identified."""
         ax1 = plt.subplot(311)
         color = "k"
@@ -1586,7 +1649,7 @@ class DownhillRun(SingleRun):
             self.sync_df["gs_rolling_avg"].mask(~self.sync_df["downhill_filter"]), color=color)
         ax1.set_ylabel("Speed (mph)")
         plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
-        plt.title("Downhill Segments (Run %s)" % self.run_label)
+        plt.title("Downhill Isolation (Run %s)" % self.run_label)
 
         ax2 = plt.subplot(312, sharex=ax1)
         ax2.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["engine_spd"])
