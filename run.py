@@ -1368,8 +1368,9 @@ class DownhillRun(SingleRun):
             if range[1]-range[0] > gs_slope_t_cr*SAMPLING_FREQ:
                 # Must have > gs_slope_t_cr seconds to count.
                 valid_slopes.append(range)
-                # print(range[1]-range[0])
             else:
+                # Adjust filter to eliminate these extraneous events.
+                downhill_filter[range[0]:range[1]] = False
                 pass
                 # Remove from downhill_filter
 
