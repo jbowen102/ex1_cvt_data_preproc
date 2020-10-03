@@ -608,11 +608,65 @@ class SingleRun(object):
         self.overwrite = overwrite
         self.description = description
         self.plot_abridge_compare()
+        self.plot_cvt_ratio()
 
     def plot_abridge_compare(self):
         # Implemented in child classes
         # Different version of this function in SSRun vs. DownhillRun
         pass
+
+    def plot_cvt_ratio(self):
+        # Plot vehicle speed, filtered speed, engine speed, CVT ratio
+        ax1 = plt.subplot(311)
+        # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
+        if self.get_run_type() == "SSRun":
+            # plot average for steady-state run
+            ax1.axhline(self.math_df.at[0, "SS_gnd_spd_avg"], color="lightcoral")
+        plt.plot(self.math_df.index/SAMPLING_FREQ,
+                 self.math_df["gs_rolling_avg"], color="lightgrey")
+        plt.plot(self.math_df.index/SAMPLING_FREQ,
+                 self.math_df["gs_rol_avg_mskd"], color="r")
+        ax1.set_ylabel("Speed (mph)")
+
+        plt.title("CVT Ratio (Run %s)" % self.run_label)
+        plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
+
+        ax2 = plt.subplot(312, sharex=ax1)
+
+        if self.get_run_type() == "SSRun":
+            es_rolling_avg = self.math_df["es_rolling_avg"]
+            engine_spd_mskd = self.math_df["es_rol_avg_mskd"]
+        elif self.get_run_type() == "DownhillRun":
+            es_rolling_avg = self.abr_df["engine_spd"]
+            engine_spd_mskd = self.abr_df["engine_spd"].mask(~self.math_df["downhill_filter"])
+
+        if self.get_run_type() == "SSRun":
+            # plot average for steady-state run
+            ax2.axhline(self.math_df.at[0, "SS_eng_spd_avg"], color="lightsteelblue")
+        plt.plot(self.abr_df.index/SAMPLING_FREQ, es_rolling_avg, color="lightgrey")
+        plt.plot(self.abr_df.index/SAMPLING_FREQ, engine_spd_mskd, color="tab:blue")
+        ax2.set_ylabel("Engine Speed (mph)")
+
+        plt.setp(ax2.get_xticklabels(), visible=False) # x labels only on bottom
+
+        ax3 = plt.subplot(313, sharex=ax1)
+
+        if self.get_run_type() == "SSRun":
+            # plot average for steady-state run
+            ax3.axhline(self.math_df.at[0, "SS_cvt_ratio_avg"], color="lightgreen")
+        plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["cvt_ratio"],
+                                                            color="lightgrey")
+        plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["cvt_ratio_mskd"],
+                                                            color="tab:green")
+        ax3.set_ylabel("CVT Ratio Calc")
+        ax3.set_ylim([-0.2, 4])
+        ax3.set_yticks([0, 1, 2, 3, 4])
+
+        # plt.show() # can't use w/ WSL. Export instead.
+        # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
+        self.export_plot("cvt")
+        plt.clf()
+        # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
 
     def export_plot(self, type):
         """Exports plot that's already been created with another method.
@@ -1059,8 +1113,7 @@ class SSRun(SingleRun):
 
         # No need to run rolling avg or slope on cvt_ratio since we aren't
         # applying criteria to it for purpose of determining steady state.
-        self.math_df["cvt_ratio_mskd"] = self.math_df["cvt_ratio"].mask(
-                                                                ~ss_filter)
+        self.math_df["cvt_ratio_mskd"].mask(~ss_filter, inplace=True)
 
         # Calculate overall (aggregate) mean of each filtereed/masked channel
         # Prefill with NaN and assign mean to first element
@@ -1112,10 +1165,10 @@ class SSRun(SingleRun):
     def plot_abridge_compare(self):
         ax1 = plt.subplot(211)
         # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
-        color = "tab:blue"
+        color = "tab:purple"
         ax1.plot(self.raw_inca_df.index, self.raw_inca_df["throttle"],
                                             color=color, label="Throttle (og)")
-        plt.title("Throttle vs. Time (Run %s)" % self.run_label)
+        plt.title("Abridge Compare (Run %s)" % self.run_label)
         ax1.set_ylim([-20, 80]) # scale down pedal switch
         ax1.set_yticks([0, 20, 40, 60, 80])
         ax1.set_ylabel("Throttle (deg)", color=color)
@@ -1133,12 +1186,12 @@ class SSRun(SingleRun):
         plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
 
         ax3 = plt.subplot(212, sharex=ax1, sharey=ax1)
-        color = "tab:blue"
+        color = "tab:purple"
         # Convert DF indices from hundredths of a second to seconds
         sync_time_series = [round(ti/SAMPLING_FREQ, 2)
                                                 for ti in self.abr_df.index]
         ax3.plot(sync_time_series, self.abr_df["throttle"],
-                                                    label="Throttle (synced)")
+                                        label="Throttle (synced)", color=color)
         plt.xlabel("Time (s)")
         # https://matplotlib.org/3.2.1/gallery/subplots_axes_and_figures/shared_axis_demo.html#sphx-glr-gallery-subplots-axes-and-figures-shared-axis-demo-py
 
@@ -1166,11 +1219,11 @@ class SSRun(SingleRun):
     def plot_ss_range(self):
         ax1 = plt.subplot(311)
         plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["gnd_speed"],
-                                                        label="Ground Speed")
+                                                label="Ground Speed", color="k")
         plt.plot(self.abr_df.index/SAMPLING_FREQ, self.math_df["gs_rolling_avg"],
-                                                        label="Rolling Avg")
+                                                label="Rolling Avg", color="c")
         plt.plot(self.abr_df.index/SAMPLING_FREQ, self.math_df["gs_rol_avg_mskd"],
-                                                        label="Steady-state")
+                                                label="Steady-state", color="r")
         plt.title("Steady-state Isolation (Run %s)" % self.run_label)
         plt.ylabel("Speed (mph)")
         plt.legend(loc="best")
@@ -1179,11 +1232,11 @@ class SSRun(SingleRun):
         ax2 = plt.subplot(312, sharex=ax1)
         # Convert DF indices from hundredths of a second to seconds
         plt.plot(self.abr_df.index/SAMPLING_FREQ,
-                        self.abr_df["engine_spd"], label="Engine Speed")
+                self.abr_df["engine_spd"], label="Engine Speed", color="tab:blue")
         plt.plot(self.abr_df.index/SAMPLING_FREQ,
-                        self.math_df["es_rolling_avg"], label="Rolling Avg")
+        self.math_df["es_rolling_avg"], label="Rolling Avg", color="tab:orange")
         plt.plot(self.abr_df.index/SAMPLING_FREQ,
-                        self.math_df["es_rol_avg_mskd"], label="Steady-state")
+        self.math_df["es_rol_avg_mskd"], label="Steady-state", color="tab:green")
 
         plt.ylabel("Engine Speed (rpm)")
         plt.legend(loc="best")
@@ -1192,7 +1245,7 @@ class SSRun(SingleRun):
         ax3 = plt.subplot(313, sharex=ax1)
         # Convert DF indices from hundredths of a second to seconds
         plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["throttle"],
-                                                        label="Throttle")
+                                            label="Throttle", color="tab:purple")
 
         plt.xlabel("Time (s)")
         plt.ylabel("Throttle (deg)")
@@ -1440,17 +1493,16 @@ class DownhillRun(SingleRun):
         self.add_downhill_avgs()
 
     def add_downhill_avgs(self):
-        # Values above 5 already masked.
-        # Now apply the downhill filter
-        self.math_df["cvt_ratio_mskd"] = self.math_df["cvt_ratio_mskd"].mask(~self.math_df["downhill_filter"])
+
+        self.math_df["gs_rol_avg_mskd"] = self.math_df["gs_rolling_avg"].mask(~self.math_df["downhill_filter"])
+        self.math_df["gs_rol_slope_mskd"] = self.math_df["gs_rolling_slope"].mask(~self.math_df["downhill_filter"])
+        self.math_df["cvt_ratio_mskd"].mask(~self.math_df["downhill_filter"], inplace=True)
+            # CVT values of 0 or above 5 already masked.
 
         self.Doc.print("\nTotal data points that fail downhill criteria: %d"
                                 % sum(~self.math_df["downhill_filter"]), True)
         self.Doc.print("Total data points that meet downhill criteria: %d"
                                  % sum(self.math_df["downhill_filter"]), True)
-
-        self.math_df["gs_rol_avg_mskd"] = self.math_df["gs_rolling_avg"].mask(~self.math_df["downhill_filter"])
-        self.math_df["gs_rol_slope_mskd"] = self.math_df["gs_rolling_slope"].mask(~self.math_df["downhill_filter"])
 
         # Create separate channels for engine-on and engine-off segments
         engine_on = (self.abr_df["engine_spd"] > 0)
@@ -1493,27 +1545,25 @@ class DownhillRun(SingleRun):
         # This performs all the actions in the parent class's method
         super(DownhillRun, self).plot_data(overwrite, description)
         self.plot_downhill_slope()
-        self.plot_cvt_ratio()
 
     def plot_abridge_compare(self):
         ax1 = plt.subplot(211)
         # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
-        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gnd_speed"])
-        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gs_rolling_avg"])
+        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gnd_speed"], color="k")
+        plt.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gs_rolling_avg"], color="c")
         plt.plot(self.sync_df.index/SAMPLING_FREQ,
-            self.sync_df["gs_rolling_avg"].mask(~self.sync_df["downhill_filter"]))
+            self.sync_df["gs_rolling_avg"].mask(~self.sync_df["downhill_filter"]), color="r")
 
-        plt.title("Ground Speed vs. Time (Run %s)" % self.run_label)
+        plt.title("Abridge Compare (Run %s)" % self.run_label)
         ax1.set_ylabel("Speed (mph)")
 
         plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
 
         ax2 = plt.subplot(212, sharex=ax1)
 
-        plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["gnd_speed"])
-        plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["gs_rolling_avg"])
-        plt.plot(self.math_df.index/SAMPLING_FREQ,
-            self.math_df["gs_rolling_avg"].mask(~self.math_df["downhill_filter"]))
+        plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["gnd_speed"], color="k")
+        plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["gs_rolling_avg"], color="c")
+        plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["gs_rol_avg_mskd"], color="r")
 
         ax2.set_ylabel("Speed (mph)")
 
@@ -1549,54 +1599,13 @@ class DownhillRun(SingleRun):
         # plt.setp(ax3.get_xticklabels(), visible=False) # x labels only on bottom
 
         ax3 = plt.subplot(313, sharex=ax1)
-        ax3.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["throttle"])
+        ax3.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["throttle"], color="tab:purple")
         ax3.set_ylabel("Throttle (deg)")
 
         self.export_plot("downhill")
         # fig_filepath = "%s/%s_%s.png" % (PLOT_DIR, self.run_label, "downhill")
         # plt.savefig(fig_filepath)
         plt.clf()
-
-    def plot_cvt_ratio(self):
-        # Plot vehicle speed, filtered speed, engine speed, CVT ratio
-        ax1 = plt.subplot(311)
-        # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
-        plt.plot(self.math_df.index/SAMPLING_FREQ,
-                 self.math_df["gs_rolling_avg"], color="lightgrey")
-        plt.plot(self.math_df.index/SAMPLING_FREQ,
-                 self.math_df["gs_rolling_avg"].mask(~self.math_df["downhill_filter"]),
-                                                 color="tab:blue")
-        ax1.set_ylabel("Speed (mph)")
-
-        plt.title("CVT Ratio (Run %s)" % self.run_label)
-        plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
-
-        ax2 = plt.subplot(312, sharex=ax1)
-
-        plt.plot(self.abr_df.index/SAMPLING_FREQ,
-                 self.abr_df["engine_spd"], color="lightgrey")
-        plt.plot(self.abr_df.index/SAMPLING_FREQ,
-                 self.abr_df["engine_spd"].mask(~self.math_df["downhill_filter"]),
-                                            color="tab:blue")
-        ax2.set_ylabel("Engine Speed (mph)")
-
-        plt.setp(ax2.get_xticklabels(), visible=False) # x labels only on bottom
-
-        ax3 = plt.subplot(313, sharex=ax1)
-
-        plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["cvt_ratio"],
-                                                            color="lightgrey")
-        plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["cvt_ratio_mskd"],
-                                                            color="tab:blue")
-        ax3.set_ylabel("CVT Ratio Calc")
-        ax3.set_ylim([0, 4])
-        ax3.set_yticks([0, 1, 2, 3, 4])
-
-        # plt.show() # can't use w/ WSL. Export instead.
-        # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
-        self.export_plot("cvt")
-        plt.clf()
-        # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
 
     def get_run_type(self):
         return "DownhillRun"
