@@ -2,6 +2,9 @@ print("Importing modules...")
 import os           # Used for analyzing file paths and directories
 import csv          # Needed to read in and write out data
 import argparse     # Used to parse optional command-line arguments
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+# https://stackoverflow.com/questions/15777951/how-to-suppress-pandas-future-warning
 import pandas as pd # Series and DataFrame structures
 import numpy as np
 import traceback
@@ -24,10 +27,6 @@ except ImportError:
 # https://stackoverflow.com/questions/3496592/conditional-import-of-modules-in-python
 print("...done\n")
 
-# Create and register a new tqdm instance with pandas. I don't know how this works.
-print("Ignore this FutureWarning:")
-tqdm.pandas()
-print("\n")
 # https://stackoverflow.com/questions/18603270/progress-indicator-during-pandas-operations
 # https://pypi.org/project/tqdm/#pandas-integration
 # Gives warning if tqdm version <4.33.0). Ignore.
@@ -585,31 +584,21 @@ class SingleRun(object):
         AXLE_RATIO = 11.47
         GEARBOX_RATIO = 1.95
 
-        gnd_spd_in_min = self.abr_df["gnd_speed"] * 5280 * 12/60 # inches/min
+        if self.get_run_type() == "SSRun":
+            gnd_spd_in_min = self.abr_df["gnd_speed"] * 5280 * 12/60 # inches/min
+        elif self.get_run_type() == "DownhillRun":
+            # Downhill run already has rolling avg available.
+            # Using this more stable data to generate CVT ratio for plot.
+            gnd_spd_in_min = self.math_df["gs_rolling_avg"] * 5280 * 12/60 # inches/min
 
         tire_ang_spd = gnd_spd_in_min / tire_circ
         self.math_df["input_shaft_ang_spd"] = tire_ang_spd * AXLE_RATIO * GEARBOX_RATIO
         self.math_df["cvt_ratio"] = (self.abr_df["engine_spd"]
                                         / self.math_df["input_shaft_ang_spd"])
 
-        if self.get_run_type() == "DownhillRun":
-            gnd_spd_in_min_fil = self.math_df["gs_rolling_avg"] * 5280 * 12/60 # inches/min
-            tire_ang_spd_fil = gnd_spd_in_min_fil / tire_circ
-            input_shaft_ang_spd_fil = tire_ang_spd_fil * AXLE_RATIO * GEARBOX_RATIO
-
-            self.math_df["cvt_ratio_smoothed"] = (self.abr_df["engine_spd"]
-                                            / input_shaft_ang_spd_fil)
-
-            # Remove any values that are zero or > 5 (including infinite).
-            self.math_df["cvt_ratio_mskd"] = self.math_df["cvt_ratio_smoothed"].mask(
-                (self.math_df["cvt_ratio_smoothed"] > 5) | (self.math_df["cvt_ratio_smoothed"] == 0))
-            # Also apply the downhill filter
-            self.math_df["cvt_ratio_mskd"] = self.math_df["cvt_ratio_mskd"].mask(~self.math_df["downhill_filter"])
-
-        else:
-            # # Remove any values that are zero or > 5 (including infinite).
-            self.math_df["cvt_ratio_mskd"] = self.math_df["cvt_ratio"].mask(
-                (self.math_df["cvt_ratio"] > 5) | (self.math_df["cvt_ratio"] == 0))
+        # # Remove any values that are zero or > 5 (including infinite).
+        self.math_df["cvt_ratio_mskd"] = self.math_df["cvt_ratio"].mask(
+            (self.math_df["cvt_ratio"] > 5) | (self.math_df["cvt_ratio"] == 0))
 
         # Transcribe to main DF for export
         self.abr_df["CVT_ratio_calc"] = self.math_df["cvt_ratio_mskd"].copy()
@@ -1015,6 +1004,10 @@ class SSRun(SingleRun):
                            window=win_size_avg, center=True)["gnd_speed"].mean()
         # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.rolling.html
 
+        # Create and register a new tqdm instance with pandas. I don't know how this works.
+        # You have to manually feed it the total iteration count first.
+        tqdm.pandas(total=len(self.abr_df.index)-(win_size_avg-1)-(win_size_slope-1))
+        # https://stackoverflow.com/questions/48935907/tqdm-not-showing-bar
         self.Doc.print("\nCalculating rolling regression on ground speed data...")
         self.math_df["gs_rolling_slope"] = self.math_df["gs_rolling_avg"].rolling(
                     window=win_size_slope, center=True).progress_apply(
@@ -1027,6 +1020,8 @@ class SSRun(SingleRun):
         self.math_df["es_rolling_avg"] = self.abr_df.rolling(
                           window=win_size_avg, center=True)["engine_spd"].mean()
 
+        tqdm.pandas(total=len(self.abr_df.index)-(win_size_avg-1)-(win_size_slope-1))
+        # https://stackoverflow.com/questions/48935907/tqdm-not-showing-bar
         self.Doc.print("Calculating rolling regression on engine speed data...")
         self.math_df["es_rolling_slope"] = self.math_df["es_rolling_avg"].rolling(
                     window=win_size_slope, center=True).progress_apply(
@@ -1241,6 +1236,8 @@ class DownhillRun(SingleRun):
         gs_rolling_avg = self.sync_df.rolling(
                            window=win_size_avg, center=True)["gnd_speed"].mean()
 
+        tqdm.pandas(total=len(self.sync_df.index)-(win_size_avg-1)-(win_size_slope-1))
+        # https://stackoverflow.com/questions/48935907/tqdm-not-showing-bar
         self.Doc.print("\nCalculating rolling regression on ground speed data...")
         gs_rolling_slope = gs_rolling_avg.rolling(
                             window=win_size_slope, center=True).progress_apply(
@@ -1443,7 +1440,54 @@ class DownhillRun(SingleRun):
         self.add_downhill_avgs()
 
     def add_downhill_avgs(self):
-        pass
+        # Values above 5 already masked.
+        # Now apply the downhill filter
+        self.math_df["cvt_ratio_mskd"] = self.math_df["cvt_ratio_mskd"].mask(~self.math_df["downhill_filter"])
+
+        self.Doc.print("\nTotal data points that fail downhill criteria: %d"
+                                % sum(~self.math_df["downhill_filter"]), True)
+        self.Doc.print("Total data points that meet downhill criteria: %d"
+                                 % sum(self.math_df["downhill_filter"]), True)
+
+        self.math_df["gs_rol_avg_mskd"] = self.math_df["gs_rolling_avg"].mask(~self.math_df["downhill_filter"])
+        self.math_df["gs_rol_slope_mskd"] = self.math_df["gs_rolling_slope"].mask(~self.math_df["downhill_filter"])
+
+        # Create separate channels for engine-on and engine-off segments
+        engine_on = (self.abr_df["engine_spd"] > 0)
+        engine_off = (self.abr_df["engine_spd"] == 0)
+
+        self.math_df["gs_rol_avg_mskd_eng_on"] = self.math_df["gs_rolling_avg"].mask(
+                                                                    engine_off)
+        self.math_df["gs_rol_avg_mskd_eng_off"] = self.math_df["gs_rolling_avg"].mask(
+                                                                    engine_on)
+
+        self.Doc.print("\nTotal engine-on downhill data points: %d"
+                        % self.math_df["gs_rol_avg_mskd_eng_on"].count(), True)
+        self.Doc.print("Total engine-off downhill data points: %d"
+                        % self.math_df["gs_rol_avg_mskd_eng_off"].count(), True)
+
+        # Calculate aggregate slope (accel is positive / decel is negative)
+        self.math_df["accel_avg_calc_eng_on"] = np.nan
+        self.math_df.at[0, "accel_avg_calc_eng_on"] = np.mean(
+                            self.math_df["gs_rol_slope_mskd"].mask(engine_off))
+
+        self.math_df["accel_avg_calc_eng_off"] = np.nan
+        self.math_df.at[0, "accel_avg_calc_eng_off"] = np.mean(
+                            self.math_df["gs_rol_slope_mskd"].mask(engine_on))
+
+        self.Doc.print("\nEngine-on downhill accel: %.2f"
+                                % self.math_df.at[0, "accel_avg_calc_eng_on"])
+        self.Doc.print("Engine-off downhill accel: %.2f"
+                                % self.math_df.at[0, "accel_avg_calc_eng_off"])
+
+        self.abr_df["accel_avg_calc_eng_on"] = self.math_df["accel_avg_calc_eng_on"]
+        self.abr_df["accel_avg_calc_eng_off"] = self.math_df["accel_avg_calc_eng_off"]
+        CHANNEL_UNITS["accel_avg_calc_eng_on"] = CHANNEL_UNITS["gnd_speed"] + "/s"
+        CHANNEL_UNITS["accel_avg_calc_eng_off"] = CHANNEL_UNITS["accel_avg_calc_eng_on"]
+
+        self.Doc.print("\nabr_df after adding steady-state data:", True)
+        self.Doc.print(self.abr_df.to_string(max_rows=10, max_cols=7,
+                                                    show_dimensions=True), True)
 
     def plot_data(self, overwrite=False, description=""):
         # This performs all the actions in the parent class's method
@@ -1481,7 +1525,7 @@ class DownhillRun(SingleRun):
 
     def plot_downhill_slope(self):
         """Plot with downhill segments identified."""
-        ax1 = plt.subplot(411)
+        ax1 = plt.subplot(311)
         color = "k"
         # https://matplotlib.org/3.1.0/gallery/color/named_colors.html
         ax1.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gnd_speed"], color=color)
@@ -1494,19 +1538,19 @@ class DownhillRun(SingleRun):
         plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
         plt.title("Downhill Segments (Run %s)" % self.run_label)
 
-        ax2 = plt.subplot(412, sharex=ax1)
+        ax2 = plt.subplot(312, sharex=ax1)
         ax2.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["engine_spd"])
         ax2.set_ylabel("Engine Speed (rpm)")
         plt.setp(ax2.get_xticklabels(), visible=False) # x labels only on bottom
 
-        ax3 = plt.subplot(413, sharex=ax1)
-        ax3.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["pedal_sw"])
-        ax3.set_ylabel("Pedal Switch")
-        plt.setp(ax3.get_xticklabels(), visible=False) # x labels only on bottom
+        # ax3 = plt.subplot(413, sharex=ax1)
+        # ax3.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["pedal_sw"])
+        # ax3.set_ylabel("Pedal Switch")
+        # plt.setp(ax3.get_xticklabels(), visible=False) # x labels only on bottom
 
-        ax4 = plt.subplot(414, sharex=ax1)
-        ax4.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["throttle"])
-        ax4.set_ylabel("Throttle (deg)")
+        ax3 = plt.subplot(313, sharex=ax1)
+        ax3.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["throttle"])
+        ax3.set_ylabel("Throttle (deg)")
 
         self.export_plot("downhill")
         # fig_filepath = "%s/%s_%s.png" % (PLOT_DIR, self.run_label, "downhill")
@@ -1517,10 +1561,11 @@ class DownhillRun(SingleRun):
         # Plot vehicle speed, filtered speed, engine speed, CVT ratio
         ax1 = plt.subplot(311)
         # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
-        plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["gnd_speed"])
-        plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["gs_rolling_avg"])
         plt.plot(self.math_df.index/SAMPLING_FREQ,
-            self.math_df["gs_rolling_avg"].mask(~self.math_df["downhill_filter"]))
+                 self.math_df["gs_rolling_avg"], color="lightgrey")
+        plt.plot(self.math_df.index/SAMPLING_FREQ,
+                 self.math_df["gs_rolling_avg"].mask(~self.math_df["downhill_filter"]),
+                                                 color="tab:blue")
         ax1.set_ylabel("Speed (mph)")
 
         plt.title("CVT Ratio (Run %s)" % self.run_label)
@@ -1528,12 +1573,18 @@ class DownhillRun(SingleRun):
 
         ax2 = plt.subplot(312, sharex=ax1)
 
-        plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["engine_spd"])
+        plt.plot(self.abr_df.index/SAMPLING_FREQ,
+                 self.abr_df["engine_spd"], color="lightgrey")
+        plt.plot(self.abr_df.index/SAMPLING_FREQ,
+                 self.abr_df["engine_spd"].mask(~self.math_df["downhill_filter"]),
+                                            color="tab:blue")
         ax2.set_ylabel("Engine Speed (mph)")
+
+        plt.setp(ax2.get_xticklabels(), visible=False) # x labels only on bottom
 
         ax3 = plt.subplot(313, sharex=ax1)
 
-        plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["cvt_ratio_smoothed"],
+        plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["cvt_ratio"],
                                                             color="lightgrey")
         plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["cvt_ratio_mskd"],
                                                             color="tab:blue")
