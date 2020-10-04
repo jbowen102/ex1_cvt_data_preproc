@@ -166,13 +166,7 @@ class RunGroup(object):
             try:
                 RunObj.process_data()
             except Exception:
-                exception_trace = traceback.format_exc()
-                # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
-                out_file = log_exception(exception_trace, RunObj.get_output())
-                input("\nProcessing failed on run %s.\nOutput and exception "
-                    "trace written to '%s' on Desktop.\n"
-                    "Press Enter to skip this run." % (run_num, out_file))
-                print("")
+                self.log_exception(RunObj, "Processing")
                 # Stage for removal from run dict.
                 bad_runs.append(run_num)
                 continue
@@ -193,12 +187,7 @@ class RunGroup(object):
             try:
                 RunObj.plot_data(overwrite, desc_str)
             except Exception:
-                exception_trace = traceback.format_exc()
-                # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
-                out_file = log_exception(exception_trace, RunObj.get_output())
-                input("\nPlotting failed on run %s.\nOutput and exception "
-                  "trace written to '%s' on Desktop.\n"
-                     "Press Enter to skip this run." % (run_num, out_file))
+                self.log_exception(RunObj, "Plotting")
                 # Stage for removal from run dict.
                 bad_runs.append(run_num)
                 continue
@@ -219,12 +208,7 @@ class RunGroup(object):
             try:
                 RunObj.export_data(overwrite, desc_str)
             except Exception:
-                exception_trace = traceback.format_exc()
-                # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
-                out_file = log_exception(exception_trace, RunObj.get_output())
-                input("\nExporting failed on run %s.\nOutput and exception "
-                    "trace written to '%s' on Desktop.\n"
-                    "Press Enter to skip this run." % (run_num, out_file))
+                self.log_exception(exception_trace, RunObj, "Exporting")
                 # Stage for removal from run dict.
                 bad_runs.append(run_num)
                 continue
@@ -249,6 +233,34 @@ class RunGroup(object):
             print("No valid INCA file found matching that run.")
             return self.prompt_for_run()
 
+    def log_exception(self, RunObj, operation):
+        """Write output file for later debugging upon encountering exception."""
+        exception_trace = traceback.format_exc()
+        # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
+
+        # Find Desktop path
+        username = getpass.getuser()
+        # https://stackoverflow.com/questions/842059/is-there-a-portable-way-to-get-the-current-username-in-python
+        home_contents = os.listdir("/mnt/c/Users/%s" % username)
+        onedrive = [folder for folder in home_contents if "OneDrive -" in folder][0]
+        desktop_path = "/mnt/c/Users/%s/%s/Desktop" % (username, onedrive)
+
+        timestamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
+        # https://stackoverflow.com/questions/415511/how-to-get-the-current-time-in-python
+        filename = "%s_Run%s_%s_error.txt" % (timestamp, RunObj.get_run_label(),
+                                                            operation.lower())
+        print(exception_trace)
+        # Wait one second to prevent overwriting previous error if it occurred less
+        # than one second ago.
+        time.sleep(1)
+        Out = RunObj.get_output()
+        with open(os.path.join(desktop_path, filename), "w") as log_file:
+            log_file.write(Out.get_log_dump() + exception_trace)
+
+        input("\n%s failed on run %s.\nOutput and exception "
+            "trace written to '%s' on Desktop.\nPress Enter to skip this run."
+                                % (operation, RunObj.get_run_label(), filename))
+        print("")
 
 class SingleRun(object):
     """Represents a single run from the raw_data directory.
@@ -1717,31 +1729,6 @@ class DownhillRun(SingleRun):
 
     def get_run_type(self):
         return "DownhillRun"
-
-
-def log_exception(excp_str, Out):
-    # get date/timestamp
-    # write output file
-
-    # Find Desktop path
-    username = getpass.getuser()
-    # https://stackoverflow.com/questions/842059/is-there-a-portable-way-to-get-the-current-username-in-python
-    home_contents = os.listdir("/mnt/c/Users/%s" % username)
-    onedrive = [folder for folder in home_contents if "OneDrive -" in folder][0]
-    desktop_path = "/mnt/c/Users/%s/%s/Desktop" % (username, onedrive)
-
-    # Wait one second to prevent overwriting previous error if it occurred less
-    # than one second ago.
-    timestamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
-    # https://stackoverflow.com/questions/415511/how-to-get-the-current-time-in-python
-    filename = timestamp + "_CVT_data_processing_error.txt"
-
-    print(excp_str)
-    time.sleep(1)
-    with open(os.path.join(desktop_path, filename), "w") as log_file:
-        log_file.write(Out.get_log_dump() + excp_str)
-
-    return filename
 
 
 class Output(object):
