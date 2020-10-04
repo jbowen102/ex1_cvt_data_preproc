@@ -103,7 +103,7 @@ class RunGroup(object):
                     # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
                     input("\nRun creation failed with file '%s'.\n"
                           "Press Enter to skip this run." % (file))
-                    print("\n")
+                    print("")
                     continue # Don't add to run dict
 
             else:
@@ -114,7 +114,7 @@ class RunGroup(object):
                     # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
                     input("\nRun creation failed with file '%s'.\n"
                           "Press Enter to skip this run." % (file))
-                    print("\n")
+                    print("")
                     continue # Don't add to run dict
 
             if ThisRun.get_run_label() in self.run_dict:
@@ -130,7 +130,7 @@ class RunGroup(object):
                          file, ThisRun.get_run_label()))
                     dup_answ = input("> ")
                 if dup_answ.lower() == "1":
-                    print("\n")
+                    print("")
                     continue
                 if dup_answ.lower() == "2":
                     # fall through
@@ -172,7 +172,7 @@ class RunGroup(object):
                 input("\nProcessing failed on run %s.\nOutput and exception "
                     "trace written to '%s' on Desktop.\n"
                     "Press Enter to skip this run." % (run_num, out_file))
-                print("\n")
+                print("")
                 # Stage for removal from run dict.
                 bad_runs.append(run_num)
                 continue
@@ -358,6 +358,7 @@ class SingleRun(object):
         self.Doc.print("\nraw_inca_df after reading in data:", True)
         self.Doc.print(self.raw_inca_df.to_string(max_rows=10, max_cols=7,
                                                 show_dimensions=True), True)
+        self.Doc.print("", True)
 
         # now read eDAQ data
         with open(self.eDAQ_path, "r") as edaq_ascii_file:
@@ -616,7 +617,8 @@ class SingleRun(object):
     def plot_data(self, overwrite=False, description=""):
         self.overwrite = overwrite
         self.description = description
-        self.Doc.print("\n")
+        self.Doc.print("")
+        # https://stackoverflow.com/questions/18028504/python-is-adding-extra-newline-to-the-output
         self.plot_abridge_compare()
         self.plot_cvt_ratio()
 
@@ -650,7 +652,7 @@ class SingleRun(object):
             ax1.set_ylim(ylims)
             # https://stackoverflow.com/questions/7386872/make-matplotlib-autoscaling-ignore-some-of-the-plots
             # https://matplotlib.org/3.1.1/gallery/misc/zorder_demo.html
-        plt.title("CVT Ratio (Run %s)" % self.run_label)
+        plt.title("Run %s - CVT Ratio (Abridged Data)" % self.run_label, loc="left")
         plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
 
         ax2 = plt.subplot(312, sharex=ax1)
@@ -667,7 +669,7 @@ class SingleRun(object):
         if self.get_run_type() == "SSRun":
             # plot average for steady-state run
             ax2.axhline(self.math_df.at[0, "SS_eng_spd_avg"], color="lightsteelblue", zorder=1)
-        ax2.set_ylabel("Engine Speed (mph)")
+        ax2.set_ylabel("Engine Speed (rpm)")
 
         plt.setp(ax2.get_xticklabels(), visible=False) # x labels only on bottom
 
@@ -963,7 +965,7 @@ class SSRun(SingleRun):
                 "%d deg for >%ds. Removed extraneous surrounding events. | "
                                     % (self.THRTL_THRESH, self.THRTL_T_THRESH))
 
-        self.Doc.print("\nValid steady-state ranges:")
+        self.Doc.print("Valid steady-state ranges:")
         for event_time in valid_event_times:
             self.Doc.print("\t%0.2f\t->\t%0.2f"
                % (event_time[0] / SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
@@ -982,7 +984,7 @@ class SSRun(SingleRun):
             else:
                 valid_event_times_c.append(pair)
 
-        self.Doc.print("\nAfter any merges:")
+        self.Doc.print("After any merges:")
         for event_time in valid_event_times_c:
             self.Doc.print("\t%0.2f\t->\t%0.2f"
                 % (event_time[0]/SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
@@ -1006,11 +1008,11 @@ class SSRun(SingleRun):
             pair[0] = self.sync_df.index[new_start_i]
             pair[1] = self.sync_df.index[new_end_i]
 
-        self.Doc.print("\nINCA times with 1-second buffers added:")
+        self.Doc.print("INCA times with 1-second buffers added:")
         for event_time in valid_event_times_c:
             self.Doc.print("\t%0.2f\t->\t%0.2f"
                % (event_time[0] / SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
-        self.Doc.print("\n", True)
+        self.Doc.print("")
 
         # Split DataFrame into valid pieces; store in lists
         valid_events = []
@@ -1033,7 +1035,7 @@ class SSRun(SingleRun):
             # end time.
             desired_start_t = time_range[1]-shift
 
-        self.Doc.print("\nShifted ranges:")
+        self.Doc.print("Shifted ranges:")
         for event in valid_events:
             self.Doc.print("\t%0.2f\t->\t%0.2f"
               % (event.index[0]/SAMPLING_FREQ, event.index[-1] / SAMPLING_FREQ))
@@ -1196,11 +1198,12 @@ class SSRun(SingleRun):
         color = "tab:purple"
         ax1.plot(self.raw_inca_df.index, self.raw_inca_df["throttle"],
                                             color=color, label="Throttle (og)")
-        plt.title("Abridge Compare (Run %s)" % self.run_label)
-        ax1.set_ylim([-20, 80]) # scale down pedal switch
+        plt.title("Run %s - Abridge Compare" % self.run_label, loc="left")
+        ax1.set_ylim([-20, 80]) # Shift throttle trace up
         ax1.set_yticks([0, 20, 40, 60, 80])
         ax1.set_ylabel("Throttle (deg)", color=color)
         ax1.tick_params(axis="y", labelcolor=color)
+        # plt.grid(True)
 
         ax2 = ax1.twinx() # second plot on same x axis
         # https://matplotlib.org/gallery/api/two_scales.html
@@ -1211,6 +1214,7 @@ class SSRun(SingleRun):
         ax2.set_yticks([0, 1])
         ax2.set_ylabel("Pedal Switch", color=color)
         ax2.tick_params(axis="y", labelcolor=color)
+        # plt.grid(True)
         plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
 
         ax3 = plt.subplot(212, sharex=ax1, sharey=ax1)
@@ -1228,15 +1232,15 @@ class SSRun(SingleRun):
         ax3.set_ylabel("Throttle (deg)", color=color)
         ax3.tick_params(axis="y", labelcolor=color)
 
-        ax4 = ax3.twinx() # second plot on same x axis
+        ax3_twin = ax3.twinx() # second plot on same x axis
         # https://matplotlib.org/gallery/api/two_scales.html
         color = "tab:red"
-        ax4.plot(sync_time_series, self.abr_df["pedal_sw"],
+        ax3_twin.plot(sync_time_series, self.abr_df["pedal_sw"],
                                     color=color, label="Pedal Switch (synced)")
-        ax4.set_ylim([-.25, 8]) # scale down pedal switch
-        ax4.set_yticks([0, 1])
-        ax4.set_ylabel("Pedal Switch", color=color)
-        ax4.tick_params(axis="y", labelcolor=color)
+        ax3_twin.set_ylim([-.25, 8]) # scale down pedal switch
+        ax3_twin.set_yticks([0, 1])
+        ax3_twin.set_ylabel("Pedal Switch", color=color)
+        ax3_twin.tick_params(axis="y", labelcolor=color)
 
         # plt.show() # can't use w/ WSL. Export instead.
         # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
@@ -1252,32 +1256,44 @@ class SSRun(SingleRun):
                                                 label="Rolling Avg", color="c")
         plt.plot(self.abr_df.index/SAMPLING_FREQ, self.math_df["gs_rol_avg_mskd"],
                                                 label="Steady-state", color="r")
-        plt.title("Steady-state Isolation (Run %s)" % self.run_label)
+        plt.title("Run %s - Steady-state Isolation (Abridged Data)"
+                                                % self.run_label, loc="left")
         plt.ylabel("Speed (mph)")
-        plt.legend(loc="best")
+        # plt.legend(loc="best")
         plt.setp(ax1.get_xticklabels(), visible=False)
 
         ax2 = plt.subplot(312, sharex=ax1)
         # Convert DF indices from hundredths of a second to seconds
         plt.plot(self.abr_df.index/SAMPLING_FREQ,
-                self.abr_df["engine_spd"], label="Engine Speed", color="tab:blue")
+                self.abr_df["engine_spd"], label="Engine Speed", color="yellowgreen")
         plt.plot(self.abr_df.index/SAMPLING_FREQ,
         self.math_df["es_rolling_avg"], label="Rolling Avg", color="tab:orange")
         plt.plot(self.abr_df.index/SAMPLING_FREQ,
-        self.math_df["es_rol_avg_mskd"], label="Steady-state", color="tab:green")
+        self.math_df["es_rol_avg_mskd"], label="Steady-state", color="tab:blue")
 
         plt.ylabel("Engine Speed (rpm)")
-        plt.legend(loc="best")
+        # plt.legend(loc="best")
         plt.setp(ax2.get_xticklabels(), visible=False)
 
         ax3 = plt.subplot(313, sharex=ax1)
+        color = "tab:purple"
         # Convert DF indices from hundredths of a second to seconds
         plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["throttle"],
-                                            label="Throttle", color="tab:purple")
+                                            label="Throttle", color=color)
+        ax3.set_ylim([-20, 80]) # Shift throttle trace up
+        ax3.set_yticks([0, 20, 40, 60, 80])
+        ax3.set_xlabel("Time (s)")
+        ax3.set_ylabel("Throttle (deg)", color=color)
+        ax3.tick_params(axis="y", labelcolor=color)
 
-        plt.xlabel("Time (s)")
-        plt.ylabel("Throttle (deg)")
-        plt.legend(loc="best")
+        ax3_twin = ax3.twinx() # second plot on same x axis
+        # https://matplotlib.org/gallery/api/two_scales.html
+        color = "tab:red"
+        ax3_twin.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["pedal_sw"], color=color)
+        ax3_twin.set_ylim([-.25, 8]) # scale down pedal switch
+        ax3_twin.set_yticks([0, 1])
+        ax3_twin.set_ylabel("Pedal Switch", color=color)
+        ax3_twin.tick_params(axis="y", labelcolor=color)
 
         # plt.show() # can't use w/ WSL.
         # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
@@ -1343,7 +1359,7 @@ class DownhillRun(SingleRun):
             # If no times were stored, then alert user but continue with
             # program.
             self.Doc.print("\nNo valid downhill events found in run %s (Criteria: "
-            "speed slope >%d mph/s, speed >%d mph, and throttle <%d deg).\n"
+            "speed slope >%d mph/s, speed >%d mph, and throttle <%d deg)."
                 % (self.run_label, gs_slope_cr, gspd_cr, throttle_cr))
             input("Press Enter to acknowledge and continue processing data without abridging.")
             # Take care of needed assignments that are typically down below.
@@ -1393,7 +1409,7 @@ class DownhillRun(SingleRun):
             # If no times were stored, then alert user but continue with
             # program.
             self.Doc.print("\nNo valid downhill events found in run %s (Criteria: "
-            "speed slope >%d mph/s, speed >%d mph, and throttle <%d deg for >%ds).\n"
+            "speed slope >%d mph/s, speed >%d mph, and throttle <%d deg for >%ds)."
                 % (self.run_label, gs_slope_cr, gspd_cr, throttle_cr, gs_slope_t_cr))
             input("Press Enter to acknowledge and continue processing data without abridging.")
             self.sync_df["gs_rolling_avg"] = gs_rolling_avg
@@ -1484,7 +1500,7 @@ class DownhillRun(SingleRun):
               % (event_range[0] / SAMPLING_FREQ, event_range[1] / SAMPLING_FREQ,
                   coeff[0]))
 
-        self.Doc.print("\nAfter widening range to capture complete event(s):")
+        self.Doc.print("After widening range to capture complete event(s):")
         for event_time in valid_ranges:
             self.Doc.print("\t%0.2f\t->\t%0.2f"
                 % (event_time[0]/SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
@@ -1504,11 +1520,11 @@ class DownhillRun(SingleRun):
             else:
                 valid_ranges_c.append(pair)
 
-        self.Doc.print("\nAfter any merges:")
+        self.Doc.print("After any merges:")
         for event_time in valid_ranges_c:
             self.Doc.print("\t%0.2f\t->\t%0.2f"
                 % (event_time[0]/SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
-        self.Doc.print("\n", True)
+        self.Doc.print("")
 
         # Split DataFrame into valid pieces; store in lists
         valid_events = []
@@ -1538,7 +1554,7 @@ class DownhillRun(SingleRun):
             # end time.
             desired_start_t = time_range[1]-shift
 
-        self.Doc.print("\nShifted ranges:")
+        self.Doc.print("Shifted ranges:")
         for event in valid_events:
             self.Doc.print("\t%0.2f\t->\t%0.2f"
               % (event.index[0]/SAMPLING_FREQ, event.index[-1] / SAMPLING_FREQ))
@@ -1637,7 +1653,7 @@ class DownhillRun(SingleRun):
         plt.plot(self.sync_df.index/SAMPLING_FREQ,
             self.sync_df["gs_rolling_avg"].mask(~self.sync_df["downhill_filter"]), color="r")
 
-        plt.title("Abridge Compare (Run %s)" % self.run_label)
+        plt.title("Run %s - Abridge Compare" % self.run_label, loc="left")
         ax1.set_ylabel("Speed (mph)")
 
         plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
@@ -1669,25 +1685,34 @@ class DownhillRun(SingleRun):
             self.sync_df["gs_rolling_avg"].mask(~self.sync_df["downhill_filter"]), color=color)
         ax1.set_ylabel("Speed (mph)")
         plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
-        plt.title("Downhill Isolation (Run %s)" % self.run_label)
+        plt.title("Run %s - Downhill Isolation (Unabridged Data)"
+                                                % self.run_label, loc="left")
 
         ax2 = plt.subplot(312, sharex=ax1)
         ax2.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["engine_spd"])
         ax2.set_ylabel("Engine Speed (rpm)")
         plt.setp(ax2.get_xticklabels(), visible=False) # x labels only on bottom
 
-        # ax3 = plt.subplot(413, sharex=ax1)
-        # ax3.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["pedal_sw"])
-        # ax3.set_ylabel("Pedal Switch")
-        # plt.setp(ax3.get_xticklabels(), visible=False) # x labels only on bottom
-
         ax3 = plt.subplot(313, sharex=ax1)
-        ax3.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["throttle"], color="tab:purple")
-        ax3.set_ylabel("Throttle (deg)")
+        color = "tab:purple"
+        ax3.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["throttle"], color=color)
+        ax3.set_ylim([-20, 80]) # Shift throttle trace up
+        ax3.set_yticks([0, 20, 40, 60, 80])
+
+        ax3.set_xlabel("Time (s)")
+        ax3.set_ylabel("Throttle (deg)", color=color)
+        ax3.tick_params(axis="y", labelcolor=color)
+
+        ax3_twin = ax3.twinx() # second plot on same x axis
+        # https://matplotlib.org/gallery/api/two_scales.html
+        color = "tab:red"
+        ax3_twin.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["pedal_sw"], color=color)
+        ax3_twin.set_ylim([-.25, 8]) # scale down pedal switch
+        ax3_twin.set_yticks([0, 1])
+        ax3_twin.set_ylabel("Pedal Switch", color=color)
+        ax3_twin.tick_params(axis="y", labelcolor=color)
 
         self.export_plot("downhill")
-        # fig_filepath = "%s/%s_%s.png" % (PLOT_DIR, self.run_label, "downhill")
-        # plt.savefig(fig_filepath)
         plt.clf()
 
     def get_run_type(self):
