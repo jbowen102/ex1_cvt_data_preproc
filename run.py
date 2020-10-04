@@ -600,7 +600,7 @@ class SingleRun(object):
 
         # # Remove any values that are zero or > 5 (including infinite).
         self.math_df["cvt_ratio_mskd"] = self.math_df["cvt_ratio"].mask(
-            (self.math_df["cvt_ratio"] > 5) | (self.math_df["cvt_ratio"] == 0))
+            (self.math_df["cvt_ratio"] > 5) | (self.math_df["cvt_ratio"] <= 0))
 
         # Transcribe to main DF for export
         self.abr_df["CVT_ratio_calc"] = self.math_df["cvt_ratio_mskd"].copy()
@@ -945,6 +945,10 @@ class SSRun(SingleRun):
                     % (self.run_label, self.THRTL_THRESH, self.THRTL_T_THRESH))
             input("Press Enter to acknowledge and continue processing data without abridging.")
             self.abr_df = self.sync_df.copy(deep=True)
+
+            self.meta_str += ("No valid pedal-down events found in run. "
+                "(Criteria: throttle >%d deg for >%ds total). Data unabridged. | "
+                                    % (self.THRTL_THRESH, self.THRTL_T_THRESH))
             return
         else:
             # Document in output file
@@ -1342,6 +1346,10 @@ class DownhillRun(SingleRun):
             self.sync_df["trendlines"] = np.nan
             self.sync_df["slopes"] = np.nan
             self.abr_df = self.sync_df.copy(deep=True)
+
+            self.meta_str += ("No valid downhill events found in run (Criteria: "
+            "speed slope >%d mph/s, speed >%d mph, and throttle <%d deg). "
+            "Data unabridged. | " % (gs_slope_cr, gspd_cr, throttle_cr))
             return
 
         # Identify separate continuous ranges.
@@ -1377,7 +1385,7 @@ class DownhillRun(SingleRun):
         if not valid_slopes:
             # If no times were stored, then alert user but continue with
             # program.
-            self.Doc.print("\nNo valid downhill events found in run %s (Criterion: "
+            self.Doc.print("\nNo valid downhill events found in run %s (Criteria: "
             "speed slope >%d mph/s, speed >%d mph, and throttle <%d deg for >%ds).\n"
                 % (self.run_label, gs_slope_cr, gspd_cr, throttle_cr, gs_slope_t_cr))
             input("Press Enter to acknowledge and continue processing data without abridging.")
@@ -1387,6 +1395,10 @@ class DownhillRun(SingleRun):
             self.sync_df["trendlines"] = np.nan
             self.sync_df["slopes"] = np.nan
             self.abr_df = self.sync_df.copy(deep=True)
+
+            self.meta_str += ("No valid downhill events found in run (Criteria: "
+            "speed slope >%d mph/s, speed >%d mph, and throttle <%d deg for >%ds). "
+            "Data unabridged. | " % (gs_slope_cr, gspd_cr, throttle_cr, gs_slope_t_cr))
             return
         else:
             # Document in output file
@@ -1572,9 +1584,9 @@ class DownhillRun(SingleRun):
         engine_on = (self.abr_df["engine_spd"] > 0)
         engine_off = (self.abr_df["engine_spd"] == 0)
 
-        self.math_df["gs_rol_avg_mskd_eng_on"] = self.math_df["gs_rolling_avg"].mask(
+        self.math_df["gs_rol_avg_mskd_eng_on"] = self.math_df["gs_rol_avg_mskd"].mask(
                                                                     engine_off)
-        self.math_df["gs_rol_avg_mskd_eng_off"] = self.math_df["gs_rolling_avg"].mask(
+        self.math_df["gs_rol_avg_mskd_eng_off"] = self.math_df["gs_rol_avg_mskd"].mask(
                                                                     engine_on)
 
         self.Doc.print("\nTotal engine-on downhill data points: %d"
@@ -1585,11 +1597,11 @@ class DownhillRun(SingleRun):
         # Calculate aggregate slope (accel is positive / decel is negative)
         self.math_df["accel_avg_calc_eng_on"] = np.nan
         self.math_df.at[0, "accel_avg_calc_eng_on"] = np.mean(
-                            self.math_df["gs_rol_slope_mskd"].mask(engine_off))
+                                        self.math_df["slopes"].mask(engine_off))
 
         self.math_df["accel_avg_calc_eng_off"] = np.nan
         self.math_df.at[0, "accel_avg_calc_eng_off"] = np.mean(
-                            self.math_df["gs_rol_slope_mskd"].mask(engine_on))
+                                        self.math_df["slopes"].mask(engine_on))
 
         self.Doc.print("\nEngine-on downhill accel: %.2f"
                                 % self.math_df.at[0, "accel_avg_calc_eng_on"])
