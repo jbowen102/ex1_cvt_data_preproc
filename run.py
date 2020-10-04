@@ -119,15 +119,22 @@ class RunGroup(object):
 
             if ThisRun.get_run_label() in self.run_dict:
                 # catch duplicate run nums.
-                input("\nMore than one run '%s' found in %s:\n"
-                    "\t'%s'\n"
-                    "\t'%s'\n"
-                    "First one will be kept.\nPress Enter to acknowledge."
-                    % (ThisRun.get_run_label(), RAW_INCA_DIR,
-                     self.run_dict[ThisRun.get_run_label()].get_inca_filename(),
-                     file))
-                print("\n")
-                continue
+                dup_answ = ""
+                while dup_answ.lower() not in ["1", "2"]:
+                    print("More than one run %s found in %s:\n"
+                        "\t'%s'\n"
+                        "\t'%s'\n"
+                        "Which one should be used as run %s? (1/2)"
+                        % (ThisRun.get_run_label(), RAW_INCA_DIR,
+                         self.run_dict[ThisRun.get_run_label()].get_inca_filename(),
+                         file, ThisRun.get_run_label()))
+                    dup_answ = input("> ")
+                if dup_answ.lower() == "1":
+                    print("\n")
+                    continue
+                if dup_answ.lower() == "2":
+                    # fall through
+                    pass
 
             self.run_dict[ThisRun.get_run_label()] = ThisRun
 
