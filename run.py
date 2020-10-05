@@ -209,7 +209,7 @@ class RunGroup(object):
             try:
                 RunObj.export_data(overwrite, desc_str)
             except Exception:
-                self.log_exception(exception_trace, RunObj, "Exporting")
+                self.log_exception(RunObj, "Exporting")
                 # Stage for removal from run dict.
                 bad_runs.append(run_num)
                 continue
@@ -778,8 +778,31 @@ class SingleRun(object):
     def export_data(self, overwrite=False, description=""):
         self.overwrite = overwrite
         self.description = description
+
         export_df = self.abr_df.drop(columns=["time_raw_inca", "time_raw_edaq"])
         # https://stackoverflow.com/questions/29763620/how-to-select-all-columns-except-one-column-in-pandas
+
+        if self.get_run_type() == "SSRun":
+            export_df["SS_gnd_spd_avg_calc"] = self.math_df["SS_gnd_spd_avg"]
+            export_df["SS_eng_spd_avg_calc"] = self.math_df["SS_eng_spd_avg"]
+            export_df["SS_cvt_ratio_avg_calc"] = self.math_df["SS_cvt_ratio_avg"]
+            CHANNEL_UNITS["SS_gnd_spd_avg_calc"] = CHANNEL_UNITS["gnd_speed"]
+            CHANNEL_UNITS["SS_eng_spd_avg_calc"] = CHANNEL_UNITS["engine_spd"]
+            CHANNEL_UNITS["SS_cvt_ratio_avg_calc"] = CHANNEL_UNITS["CVT_ratio_calc"]
+
+        elif self.get_run_type() == "DownhillRun":
+            # Pad the columns to not use same columns as SS run.
+            export_df[" "] = np.nan
+            export_df["  "] = np.nan
+            export_df["   "] = np.nan
+            CHANNEL_UNITS[" "] = ""
+            CHANNEL_UNITS["  "] = ""
+            CHANNEL_UNITS["   "] = ""
+
+            export_df["accel_avg_calc_eng_on"] = self.math_df["accel_avg_calc_eng_on"]
+            export_df["accel_avg_calc_eng_off"] = self.math_df["accel_avg_calc_eng_off"]
+            CHANNEL_UNITS["accel_avg_calc_eng_on"] = CHANNEL_UNITS["gnd_speed"] + "/s"
+            CHANNEL_UNITS["accel_avg_calc_eng_off"] = CHANNEL_UNITS["accel_avg_calc_eng_on"]
 
         # Create to list of lists for easier writing out
         # Convert time values from hundredths of a second to seconds
@@ -1195,15 +1218,6 @@ class SSRun(SingleRun):
                                                    self.math_df["cvt_ratio_mskd"])
         # https://stackoverflow.com/questions/13842088/set-value-for-particular-cell-in-pandas-dataframe-using-index
         # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.at.html
-
-        # Transcribe to main DF for export
-        # Leave out average SS slopes.
-        self.abr_df["SS_gnd_spd_avg_calc"] = self.math_df["SS_gnd_spd_avg"]
-        self.abr_df["SS_eng_spd_avg_calc"] = self.math_df["SS_eng_spd_avg"]
-        self.abr_df["SS_cvt_ratio_avg_calc"] = self.math_df["SS_cvt_ratio_avg"]
-        CHANNEL_UNITS["SS_gnd_spd_avg_calc"] = CHANNEL_UNITS["gnd_speed"]
-        CHANNEL_UNITS["SS_eng_spd_avg_calc"] = CHANNEL_UNITS["engine_spd"]
-        CHANNEL_UNITS["SS_cvt_ratio_avg_calc"] = CHANNEL_UNITS["CVT_ratio_calc"]
 
         self.Doc.print("\nabr_df after adding steady-state data:", True)
         self.Doc.print(self.abr_df.to_string(max_rows=10, max_cols=7,
@@ -1629,7 +1643,6 @@ class DownhillRun(SingleRun):
         self.add_downhill_avgs()
 
     def add_downhill_avgs(self):
-
         self.math_df["gs_rol_avg_mskd"] = self.math_df["gs_rolling_avg"].mask(~self.math_df["downhill_filter"])
         self.math_df["gs_rol_slope_mskd"] = self.math_df["gs_rolling_slope"].mask(~self.math_df["downhill_filter"])
         self.math_df["cvt_ratio_mskd"].mask(~self.math_df["downhill_filter"], inplace=True)
@@ -1667,11 +1680,6 @@ class DownhillRun(SingleRun):
                                 % self.math_df.at[0, "accel_avg_calc_eng_on"])
         self.Doc.print("Engine-off downhill accel: %.2f"
                                 % self.math_df.at[0, "accel_avg_calc_eng_off"])
-
-        self.abr_df["accel_avg_calc_eng_on"] = self.math_df["accel_avg_calc_eng_on"]
-        self.abr_df["accel_avg_calc_eng_off"] = self.math_df["accel_avg_calc_eng_off"]
-        CHANNEL_UNITS["accel_avg_calc_eng_on"] = CHANNEL_UNITS["gnd_speed"] + "/s"
-        CHANNEL_UNITS["accel_avg_calc_eng_off"] = CHANNEL_UNITS["accel_avg_calc_eng_on"]
 
         self.Doc.print("\nabr_df after adding steady-state data:", True)
         self.Doc.print(self.abr_df.to_string(max_rows=10, max_cols=7,
