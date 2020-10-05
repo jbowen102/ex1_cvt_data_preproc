@@ -650,18 +650,33 @@ class SingleRun(object):
                  self.math_df["gs_rol_avg_mskd"], color="r", zorder=3)
         ax1.set_ylabel("Speed (mph)")
 
-        if self.get_run_type() == "SSRun":
+        if self.get_run_type() == "SSRun" and ~np.isnan(self.math_df.at[0, "SS_gnd_spd_avg"]):
             # plot average for steady-state run
-            ax1.axhline(self.math_df.at[0, "SS_gnd_spd_avg"],
-                                                   color="lightcoral", zorder=1)
+            avg = self.math_df.at[0, "SS_gnd_spd_avg"]
+            color="lightcoral"
+            ax1.axhline(avg, color=color, zorder=1)
+            if avg > ax1.get_ylim()[1]*2/10:
+                y_pos = avg - ax1.get_ylim()[1]/8
+            else:
+                y_pos = avg + ax1.get_ylim()[1]/10
+            ax1.text(ax1.get_xlim()[0], y_pos, str(round(avg, 1)), color=color,
+                                                            fontsize="x-small")
         elif self.get_run_type() == "DownhillRun":
             # Plot slopes for downhill run
             # Restore existing y-axis limits after adding slopes because slopes
             # may extend beyond optimal window limits.
             ylims = ax1.get_ylim()
+            color = "lightcoral"
             plt.plot(self.math_df.index/SAMPLING_FREQ,
-                    self.math_df["trendlines"], color="lightcoral", zorder=1, scaley=False)
+                    self.math_df["trendlines"], color=color, zorder=1, scaley=False)
             ax1.set_ylim(ylims)
+            ax1.text(ax1.get_xlim()[0], ax1.get_ylim()[1]*9/10,
+              " Eng-on: " + str(round(self.math_df.at[0, "accel_avg_calc_eng_on"], 2)),
+                                                color=color, fontsize="x-small")
+            ax1.text(ax1.get_xlim()[0], ax1.get_ylim()[1]*8/10,
+              " Eng-off: " + str(round(self.math_df.at[0, "accel_avg_calc_eng_off"], 2)),
+                                                color=color, fontsize="x-small")
+
             # https://stackoverflow.com/questions/7386872/make-matplotlib-autoscaling-ignore-some-of-the-plots
             # https://matplotlib.org/3.1.1/gallery/misc/zorder_demo.html
         plt.title("Run %s - CVT Ratio (Abridged Data)" % self.run_label, loc="left")
@@ -678,9 +693,17 @@ class SingleRun(object):
 
         plt.plot(self.abr_df.index/SAMPLING_FREQ, es_rolling_avg, color="lightgrey", zorder=2)
         plt.plot(self.abr_df.index/SAMPLING_FREQ, engine_spd_mskd, color="tab:blue", zorder=3)
-        if self.get_run_type() == "SSRun":
+        if self.get_run_type() == "SSRun" and ~np.isnan(self.math_df.at[0, "SS_eng_spd_avg"]):
             # plot average for steady-state run
-            ax2.axhline(self.math_df.at[0, "SS_eng_spd_avg"], color="lightsteelblue", zorder=1)
+            avg = self.math_df.at[0, "SS_eng_spd_avg"]
+            color = "lightsteelblue"
+            ax2.axhline(avg, color=color, zorder=1)
+            if avg > ax2.get_ylim()[1]*2/10:
+                y_pos = avg - ax2.get_ylim()[1]/10
+            else:
+                y_pos = avg + ax2.get_ylim()[1]/10
+            ax2.text(ax2.get_xlim()[0], y_pos, "%.0f" % avg, color=color,
+                                                            fontsize="x-small")
         ax2.set_ylabel("Engine Speed (rpm)")
 
         plt.setp(ax2.get_xticklabels(), visible=False) # x labels only on bottom
@@ -691,13 +714,20 @@ class SingleRun(object):
                                                     color="lightgrey", zorder=2)
         plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["cvt_ratio_mskd"],
                                                     color="tab:green", zorder=3)
-        if self.get_run_type() == "SSRun":
-            # plot average for steady-state run
-            ax3.axhline(self.math_df.at[0, "SS_cvt_ratio_avg"],
-                                                   color="lightgreen", zorder=1)
-        ax3.set_ylabel("CVT Ratio Calc")
         ax3.set_ylim([-0.2, 4])
         ax3.set_yticks([0, 1, 2, 3, 4])
+        if self.get_run_type() == "SSRun" and ~np.isnan(self.math_df.at[0, "SS_cvt_ratio_avg"]):
+            # plot average for steady-state run
+            avg = self.math_df.at[0, "SS_cvt_ratio_avg"]
+            color="lightgreen"
+            ax3.axhline(avg, color=color, zorder=1)
+            if avg > ax3.get_ylim()[1]*2/10:
+                y_pos = avg - ax3.get_ylim()[1]/10
+            else:
+                y_pos = avg + ax3.get_ylim()[1]/25
+            ax3.text(ax3.get_xlim()[0], y_pos, "  " + str(round(avg, 1)),
+                                                color=color, fontsize="x-small")
+        ax3.set_ylabel("CVT Ratio Calc")
 
         # plt.show() # can't use w/ WSL. Export instead.
         # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2

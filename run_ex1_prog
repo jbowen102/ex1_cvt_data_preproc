@@ -54,7 +54,7 @@ then
 	printf "\nCopying data from P: drive RAW_DATA_TO_SYNC/INCA folder...\n"
 	rsync -aziv --delete "${REMOTE_RAW}"/INCA/ ${LOCAL_RAW}/INCA | sed  's/^/  /'
 	# Rsync only copies files that have changed or don't exist already in local
-	# raw_data folder. delete-before option removes extraneous residual files.
+	# raw_data folder. delete option removes extraneous residual files.
 	# Piping to 'sed' bash program to indent rsync output to aid readability.
 	printf "Finished copying INCA data.\n"
 else
@@ -67,7 +67,7 @@ then
 	printf "\nCopying data from P: drive RAW_DATA_TO_SYNC/eDAQ folder...\n"
 	rsync -aziv --delete "${REMOTE_RAW}"/eDAQ/ ${LOCAL_RAW}/eDAQ | sed  's/^/  /'
 	# Rsync only copies files that have changed or don't exist already in local
-	# raw_data folder. delete-before option removes extraneous residual files.
+	# raw_data folder. delete option removes extraneous residual files.
 	# Piping to 'sed' bash program to indent rsync output to aid readability.
 	printf "Finished copying eDAQ data.\n"
 else
