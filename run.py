@@ -33,7 +33,7 @@ print("...done\n")
 # Gives warning if tqdm version <4.33.0). Ignore.
 # https://github.com/tqdm/tqdm/issues/780
 
-# global constancts
+# global constants
 RAW_INCA_DIR = "./raw_data/INCA"
 RAW_EDAQ_DIR = "./raw_data/eDAQ"
 SYNC_DIR = "./sync_data"
@@ -72,8 +72,9 @@ class DataTrimError(Exception):
 
 class RunGroup(object):
     """Represents a collection of runs from the raw_data directory."""
-    def __init__(self, process_all=False, verbose=False):
+    def __init__(self, log_dir, process_all=False, verbose=False):
         # create SingleRun object for each run but don't read in data yet.
+        self.log_dir = log_dir
         self.verbosity = verbose
         self.build_run_dict()
         self.process_runs(process_all)
@@ -238,13 +239,6 @@ class RunGroup(object):
         exception_trace = traceback.format_exc()
         # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
 
-        # Find Desktop path
-        username = getpass.getuser()
-        # https://stackoverflow.com/questions/842059/is-there-a-portable-way-to-get-the-current-username-in-python
-        home_contents = os.listdir("/mnt/c/Users/%s" % username)
-        onedrive = [folder for folder in home_contents if "OneDrive -" in folder][0]
-        desktop_path = "/mnt/c/Users/%s/%s/Desktop" % (username, onedrive)
-
         timestamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
         # https://stackoverflow.com/questions/415511/how-to-get-the-current-time-in-python
         filename = "%s_Run%s_%s_error.txt" % (timestamp, RunObj.get_run_label(),
@@ -254,12 +248,13 @@ class RunGroup(object):
         # than one second ago.
         time.sleep(1)
         Out = RunObj.get_output()
-        with open(os.path.join(desktop_path, filename), "w") as log_file:
+        full_path = os.path.join(self.log_dir, filename)
+        with open(full_path, "w") as log_file:
             log_file.write(Out.get_log_dump() + exception_trace)
 
         input("\n%s failed on run %s.\nOutput and exception "
-            "trace written to '%s' on Desktop.\nPress Enter to skip this run."
-                                % (operation, RunObj.get_run_label(), filename))
+            "trace written to '%s'.\nPress Enter to skip this run."
+                                % (operation, RunObj.get_run_label(), full_path))
         print("")
 
 class SingleRun(object):
@@ -1776,6 +1771,14 @@ class Output(object):
 
 
 def main_prog():
+
+    # Find Desktop path
+    username = getpass.getuser()
+    # https://stackoverflow.com/questions/842059/is-there-a-portable-way-to-get-the-current-username-in-python
+    home_contents = os.listdir("/mnt/c/Users/%s" % username)
+    onedrive = [folder for folder in home_contents if "OneDrive -" in folder][0]
+    desktop_path = "/mnt/c/Users/%s/%s/Desktop" % (username, onedrive)
+
     # Set up command-line argument parser
     # https://docs.python.org/3/howto/argparse.html
     # If you pass in any arguments from the command line after "python run.py",
@@ -1797,11 +1800,14 @@ def main_prog():
     parser.add_argument("-d", "--desc", help="Specify a description string to "
         "append to output file names - data and plot files (if -p also used)",
                                                         type=str, default="")
+    parser.add_argument("-l", "--log-dir", help="Specify a directory where log "
+        "file containing that run's output and error trace should be saved when "
+                        "error encountered.", type=str, default=desktop_path)
 
     # https://www.programcreek.com/python/example/748/argparse.ArgumentParser
     args = parser.parse_args()
 
-    AllRuns = RunGroup(args.auto, args.verbose)
+    AllRuns = RunGroup(args.log_dir, args.auto, args.verbose)
 
     if args.plot and PLOT_LIB_PRESENT:
         if not os.path.exists(PLOT_DIR):

@@ -76,11 +76,19 @@ else
 fi
 
 
+# Make new folder in SYNCED_DATA every time program run.
+# Needed because fig file names change each time so new ones won't always
+# replace old ones.
+# Also, user doesn't want extraneous data purged from folder before transfer.
+TIMESTAMP="$(date "+%Y-%m-%dT%H%M%S")"
+mkdir "${REMOTE_SYNC}/${TIMESTAMP}"
+
+
 # Navigate into the local project then run the python script, storing its return value.
 cd ~/ex1_cvt_data_preproc # Need to be in the project dir for the Python script to run its main function.
 
 printf "\nStarting Python script:\n"
-python3 run.py --auto --over --plot
+python3 run.py --auto --over --plot --log-dir "${REMOTE_SYNC}/${TIMESTAMP}"
 PYTHON_RETURN=$? # gets return value of last command executed.
 printf "Finished Python script.\n"
 
@@ -92,13 +100,6 @@ then
 	exit 1
 fi
 
-
-# Make new folder in SYNCED_DATA every time program run.
-# Needed because fig file names change each time so new ones won't always
-# replace old ones.
-# Also, user doesn't want extraneous data purged from folder before transfer.
-TIMESTAMP="$(date "+%Y-%m-%dT%H%M%S")"
-mkdir "${REMOTE_SYNC}/${TIMESTAMP}"
 
 # Copy synced data to P: drive.
 printf "\nCopying synced data (CSVs) to P:/.../SYNCED_DATA/${TIMESTAMP} folder...\n"
