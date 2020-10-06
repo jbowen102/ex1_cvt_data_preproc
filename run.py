@@ -32,25 +32,30 @@ except ImportError:
 # https://stackoverflow.com/questions/3496592/conditional-import-of-modules-in-python
 print("...done\n")
 
-# global constants
+# global constants: directory structure
 RAW_INCA_DIR = "./raw_data/INCA"
 RAW_EDAQ_DIR = "./raw_data/eDAQ"
 SYNC_DIR = "./sync_data"
 PLOT_DIR = "./figs"
+# Find Desktop path, default destination for log files
+username = getpass.getuser()
+# https://stackoverflow.com/questions/842059/is-there-a-portable-way-to-get-the-current-username-in-python
+home_contents = os.listdir("/mnt/c/Users/%s" % username)
+onedrive = [folder for folder in home_contents if "OneDrive -" in folder][0]
+LOG_DIR = "/mnt/c/Users/%s/%s/Desktop" % (username, onedrive)
 
+
+# global constants: raw data format
 INCA_CHANNELS = ["time", "pedal_sw", "engine_spd", "throttle"]
 EDAQ_CHANNELS = ["time", "pedal_v", "gnd_speed", "pedal_sw"]
-
 CHANNEL_UNITS = {"time": "s",
                  "pedal_sw": "off/on",
                  "pedal_v": "V",
                  "engine_spd": "rpm",
                  "gnd_speed": "mph",
                  "throttle": "deg"}
-
 INCA_HEADER_HT = 5 # how many non-data rows at top of raw INCA file.
 EDAQ_HEADER_HT = 1 # how many non-data rows at top of raw eDAQ file.
-
 SAMPLING_FREQ = 100 # Hz
 
 # Some case-specific constants stored in class definitions
@@ -65,15 +70,11 @@ class DataReadError(Exception):
 class DataSyncError(Exception):
     pass
 
-class DataTrimError(Exception):
-    pass
-
 
 class RunGroup(object):
     """Represents a collection of runs from the raw_data directory."""
-    def __init__(self, log_dir, process_all=False, verbose=False, warn=False):
+    def __init__(self, process_all=False, verbose=False, warn=False):
         # create SingleRun object for each run but don't read in data yet.
-        self.log_dir = log_dir
         self.verbosity = verbose
         self.warn_p = warn
         self.build_run_dict()
@@ -159,7 +160,7 @@ class RunGroup(object):
             try:
                 RunObj.process_data()
             except Exception:
-                self.log_exception(RunObj, "Processing")
+                RunObj.log_exception("Processing")
                 # Stage for removal from run dict.
                 bad_runs.append(run_num)
                 continue
@@ -180,7 +181,7 @@ class RunGroup(object):
             try:
                 RunObj.plot_data(overwrite, desc_str)
             except Exception:
-                self.log_exception(RunObj, "Plotting")
+                RunObj.log_exception("Plotting")
                 # Stage for removal from run dict.
                 bad_runs.append(run_num)
                 continue
@@ -201,7 +202,7 @@ class RunGroup(object):
             try:
                 RunObj.export_data(overwrite, desc_str)
             except Exception:
-                self.log_exception(RunObj, "Exporting")
+                RunObj.log_exception("Exporting")
                 # Stage for removal from run dict.
                 bad_runs.append(run_num)
                 continue
@@ -226,28 +227,6 @@ class RunGroup(object):
             print("No valid INCA file found matching that run.")
             return self.prompt_for_run()
 
-    def log_exception(self, RunObj, operation):
-        """Write output file for later debugging upon encountering exception."""
-        exception_trace = traceback.format_exc()
-        # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
-
-        timestamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
-        # https://stackoverflow.com/questions/415511/how-to-get-the-current-time-in-python
-        filename = "%s_Run%s_%s_error.txt" % (timestamp, RunObj.get_run_label(),
-                                                            operation.lower())
-        print(exception_trace)
-        # Wait one second to prevent overwriting previous error if it occurred less
-        # than one second ago.
-        time.sleep(1)
-        Out = RunObj.get_output()
-        full_path = os.path.join(self.log_dir, filename)
-        with open(full_path, "w") as log_file:
-            log_file.write(Out.get_log_dump() + exception_trace)
-
-        input("\n%s failed on run %s.\nOutput and exception "
-            "trace written to '%s'.\nPress Enter to skip this run."
-                                % (operation, RunObj.get_run_label(), full_path))
-        print("")
 
 class SingleRun(object):
     """Represents a single run from the raw_data directory.
@@ -852,6 +831,29 @@ class SingleRun(object):
             sync_file_csv.writerows(sync_array)
             self.Doc.print("...done")
 
+    def log_exception(self, operation):
+        """Write output file for later debugging upon encountering exception."""
+        exception_trace = traceback.format_exc()
+        # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
+
+        timestamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
+        # https://stackoverflow.com/questions/415511/how-to-get-the-current-time-in-python
+        filename = "%s_Run%s_%s_error.txt" % (timestamp, self.get_run_label(),
+                                                            operation.lower())
+        print(exception_trace)
+        # Wait one second to prevent overwriting previous error if it occurred less
+        # than one second ago.
+        time.sleep(1)
+        full_path = os.path.join(LOG_DIR, filename)
+        with open(full_path, "w") as log_file:
+            log_file.write(self.get_output().get_log_dump() + exception_trace)
+
+        input("\n%s failed on run %s.\nOutput and exception "
+            "trace written to '%s'.\nPress Enter to skip this run."
+                                % (operation, self.get_run_label(), full_path))
+        print("")
+
+
     def get_run_label(self):
         return self.run_label
 
@@ -888,8 +890,8 @@ class SSRun(SingleRun):
         whatever time threshold).
         """
         # Define constants used to isolating valid events.
-        self.THRTL_THRESH = 45 # degrees ("throttle threshold")
-        self.THRTL_T_THRESH = 2 # seconds ("throttle time threshold")
+        self.thrtl_thresh = 45 # degrees ("throttle threshold")
+        self.thrtl_t_thresh = 2 # seconds ("throttle time threshold")
 
         # Need to repair any gaps in INCA samples. If pedal was actuated
         # when sampling cut out, and it was still actuated when the sampling
@@ -924,25 +926,25 @@ class SSRun(SingleRun):
 
                 ## Calculate throttle >45 deg time to determine event validity
                 if not counting and (self.sync_df["throttle"][ti] >
-                                                            self.THRTL_THRESH):
+                                                            self.thrtl_thresh):
                     # first time throttle exceeds 45 deg
                     self.Doc.print("\t\tThrottle >%d deg at time\t%0.2fs" %
-                                        (self.THRTL_THRESH, ti / SAMPLING_FREQ))
+                                        (self.thrtl_thresh, ti / SAMPLING_FREQ))
                     high_throttle_time[0] = ti
                     counting = True
 
                 elif counting and (self.sync_df["throttle"][ti] <
-                                                            self.THRTL_THRESH):
+                                                            self.thrtl_thresh):
                     # throttle drops below 45 deg
                     self.Doc.print("\t\tThrottle <%d deg at time\t%0.2fs" %
-                                        (self.THRTL_THRESH, ti / SAMPLING_FREQ))
+                                        (self.thrtl_thresh, ti / SAMPLING_FREQ))
                     high_throttle_time[1] = self.sync_df.index[i-1] # prev. time
                     delta = high_throttle_time[1] - high_throttle_time[0]
                     self.Doc.print("\t\tThrottle >%d deg total t:\t%0.2fs" %
-                                    (self.THRTL_THRESH, delta / SAMPLING_FREQ))
+                                    (self.thrtl_thresh, delta / SAMPLING_FREQ))
                     # calculate if that >45deg event lasted longer than 2s.
                     if (high_throttle_time[1] - high_throttle_time[0] >
-                                          self.THRTL_T_THRESH * SAMPLING_FREQ):
+                                          self.thrtl_t_thresh * SAMPLING_FREQ):
                         # Multiplying by sampling f to get hundredths of a sec.
                         keep = True
                         # now the times stored in ped_buffer constitute a valid
@@ -956,14 +958,14 @@ class SSRun(SingleRun):
                 # throttle angle drops below its threshold.
                 if counting:
                     self.Doc.print("\t(Pedal lifted before throttle dropped "
-                                          "below %d deg.)" % self.THRTL_THRESH)
+                                          "below %d deg.)" % self.thrtl_thresh)
                     # similar to above code:
                     high_throttle_time[1] = self.sync_df.index[i-1] # prev. time
                     delta = high_throttle_time[1] - high_throttle_time[0]
                     self.Doc.print("\t\tThrottle >%d deg total t:\t%0.2fs" %
-                                     (self.THRTL_THRESH, delta / SAMPLING_FREQ))
+                                     (self.thrtl_thresh, delta / SAMPLING_FREQ))
                     if (high_throttle_time[1] - high_throttle_time[0] >
-                                          self.THRTL_T_THRESH * SAMPLING_FREQ):
+                                          self.thrtl_t_thresh * SAMPLING_FREQ):
                         keep = True
                     counting = False # reset indicator
                     high_throttle_time = [0, 0] # reset
@@ -982,14 +984,14 @@ class SSRun(SingleRun):
         # One last check in case pedal-down event was ongoing when file ended.
         if counting:
             self.Doc.print("\t(File ended before throttle dropped "
-                                  "below %d deg.)" % self.THRTL_THRESH)
+                                  "below %d deg.)" % self.thrtl_thresh)
             # similar to above code:
             high_throttle_time[1] = self.sync_df.index[i-1] # prev. time
             delta = high_throttle_time[1] - high_throttle_time[0]
             self.Doc.print("\t\tThrottle >%d deg total t:\t%0.2fs" %
-                             (self.THRTL_THRESH, delta / SAMPLING_FREQ))
+                             (self.thrtl_thresh, delta / SAMPLING_FREQ))
             if (high_throttle_time[1] - high_throttle_time[0] >
-                                  self.THRTL_T_THRESH * SAMPLING_FREQ):
+                                  self.thrtl_t_thresh * SAMPLING_FREQ):
                 keep = True
             counting = False # reset indicator
             high_throttle_time = [0, 0] # reset
@@ -1004,10 +1006,10 @@ class SSRun(SingleRun):
             self.Doc.warn("No valid pedal-down events found in run %s "
                                 "(Criteria: throttle >%d deg for >%ds total).\n"
                                 "Processing will continue without abridging."
-                    % (self.run_label, self.THRTL_THRESH, self.THRTL_T_THRESH))
+                    % (self.run_label, self.thrtl_thresh, self.thrtl_t_thresh))
             self.meta_str += ("No valid pedal-down events found in run. "
                 "(Criteria: throttle >%d deg for >%ds total). Data unabridged. | "
-                                    % (self.THRTL_THRESH, self.THRTL_T_THRESH))
+                                    % (self.thrtl_thresh, self.thrtl_t_thresh))
 
             self.abr_df = self.sync_df.copy(deep=True)
             return
@@ -1015,7 +1017,7 @@ class SSRun(SingleRun):
             # Document in output file
             self.meta_str += ("Isolated events where throttle exceeded "
                 "%d deg for >%ds. Removed extraneous surrounding events. | "
-                                    % (self.THRTL_THRESH, self.THRTL_T_THRESH))
+                                    % (self.thrtl_thresh, self.thrtl_t_thresh))
 
         self.Doc.print("Valid steady-state ranges:")
         for event_time in valid_event_times:
@@ -1788,12 +1790,7 @@ class Output(object):
 
 
 def main_prog():
-    # Find Desktop path
-    username = getpass.getuser()
-    # https://stackoverflow.com/questions/842059/is-there-a-portable-way-to-get-the-current-username-in-python
-    home_contents = os.listdir("/mnt/c/Users/%s" % username)
-    onedrive = [folder for folder in home_contents if "OneDrive -" in folder][0]
-    desktop_path = "/mnt/c/Users/%s/%s/Desktop" % (username, onedrive)
+    global LOG_DIR
 
     # Set up command-line argument parser
     # https://docs.python.org/3/howto/argparse.html
@@ -1818,14 +1815,19 @@ def main_prog():
                                                         type=str, default="")
     parser.add_argument("-l", "--log-dir", help="Specify a directory where log "
         "file containing that run's output and error trace should be saved when "
-                        "error encountered.", type=str, default=desktop_path)
+                            "error encountered.", type=str, default=LOG_DIR)
     parser.add_argument("-i", "--ignore-warn", help="Do not prompt user to "
                                 "acknowledge warnings.", action="store_false")
 
     # https://www.programcreek.com/python/example/748/argparse.ArgumentParser
     args = parser.parse_args()
 
-    AllRuns = RunGroup(args.log_dir, args.auto, args.verbose, args.ignore_warn)
+    if os.path.isdir(args.log_dir):
+        LOG_DIR = args.log_dir  # update global variable
+    else:
+        raise FilenameError("Bad log-dir argument. Must be valid path. Aborting.")
+
+    AllRuns = RunGroup(args.auto, args.verbose, args.ignore_warn)
 
     if args.plot and PLOT_LIB_PRESENT:
         if not os.path.exists(PLOT_DIR):
