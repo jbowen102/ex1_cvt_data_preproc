@@ -47,16 +47,29 @@ LOG_DIR = "/mnt/c/Users/%s/%s/Desktop" % (username, onedrive)
 
 # global constants: raw data format
 INCA_CHANNELS = ["time", "pedal_sw", "engine_spd", "throttle"]
-EDAQ_CHANNELS = ["time", "pedal_v", "gnd_speed", "pedal_sw"]
+EDAQ_CHANNELS_5 = ["time", "pedal_v", "gnd_speed", "pedal_sw"]
+EDAQ_CHANNELS_6 = ["time", "pedal_v", "wtq_RR", "wspd_RR", "wtq_LR", "wspd_LR",
+                                                                    "pedal_sw"]
 CHANNEL_UNITS = {"time": "s",
                  "pedal_sw": "off/on",
                  "pedal_v": "V",
                  "engine_spd": "rpm",
                  "gnd_speed": "mph",
-                 "throttle": "deg"}
+                 "throttle": "deg",
+                 "wtq_RR": "ft-lb",
+                 "wtq_LR": "ft-lb",
+                 "wspd_RR": "rpm",
+                 "wspd_LR": "rpm"
+                 }
 INCA_HEADER_HT = 5 # how many non-data rows at top of raw INCA file.
 EDAQ_HEADER_HT = 1 # how many non-data rows at top of raw eDAQ file.
 SAMPLING_FREQ = 100 # Hz
+
+# global constants: vehicle parameters
+ROLLING_RADIUS_FACTOR = 0.965
+TIRE_DIAM_IN = 18 # inches
+AXLE_RATIO = 11.47
+GEARBOX_RATIO = 1.95
 
 # Some case-specific constants stored in class definitions
 
@@ -261,12 +274,13 @@ class SingleRun(object):
     def process_data(self):
         self.read_data()
         self.sync_data()
+        if int(self.run_label[:2]) > 5:
+            self.calc_gnd_speed() # only needed for torque-meter runs.
         self.abridge_data()
         self.add_math_channels()
 
-    def find_edaq_path(self):
+    def find_edaq_path(self, eDAQ_file_num):
         """Locate path to eDAQ file corresponding to INCA run num."""
-        eDAQ_file_num = self.run_label[0:2]
 
         if not os.path.exists(RAW_EDAQ_DIR):
             raise DataReadError("No raw eDAQ directory found. Put data in this"
@@ -303,7 +317,14 @@ class SingleRun(object):
 
     def read_data(self):
         """Read in both INCA and eDAQ data from raw_data directory"""
-        self.find_edaq_path()
+        eDAQ_file_num = self.run_label[0:2]
+        self.find_edaq_path(eDAQ_file_num)
+
+        # Channels changed starting with eDAQ file "06"
+        if int(eDAQ_file_num) > 5:
+            self.edaq_channels = EDAQ_CHANNELS_6
+        else:
+            self.edaq_channels = EDAQ_CHANNELS_5
 
         # Read in both eDAQ and INCA data for specific run.
         # read INCA data first
@@ -345,7 +366,7 @@ class SingleRun(object):
             # https://stackoverflow.com/questions/7856296/parsing-csv-tab-delimited-txt-file-with-python
 
             raw_edaq_dict = {}
-            for channel in EDAQ_CHANNELS:
+            for channel in self.edaq_channels:
                 raw_edaq_dict[channel] = []
 
             for j, eDAQ_row in enumerate(eDAQ_file_in):
@@ -378,7 +399,7 @@ class SingleRun(object):
                     # Only add this run's channels to our data list.
                     # Time is always in 1st column. Round to nearest hundredth.
                     raw_edaq_dict["time"].append(float(eDAQ_row[0]))
-                    for n, channel in enumerate(EDAQ_CHANNELS[1:]):
+                    for n, channel in enumerate(self.edaq_channels[1:]):
                         raw_edaq_dict[channel].append(
                                         float(eDAQ_row[edaq_run_start_col+n]))
 
@@ -462,13 +483,17 @@ class SingleRun(object):
         # time gaps in either dataset (have only seen it in one INCA run so far).
         end_time = min(inca_df.index[-1], edaq_df.index[-1])
 
-        # The only channel in eDAQ that's valuable and unique is gnd_speed.
-        # Also carry over raw time for debugging purposes.
+        # Leave out redundant channels in eDAQ data.
+        # Carry over raw time for debugging purposes.
         # The suffix options keep the two DFs' time columns from conflicting.
         self.sync_df = inca_df.loc[0:end_time].join(
-                               edaq_df.loc[0:end_time, edaq_df.columns.isin(
-                                                    ["time", "gnd_speed"])],
+               edaq_df.loc[0:end_time, edaq_df.drop(
+                                    columns=["pedal_v", "pedal_sw"]).columns],
                          lsuffix="_raw_inca", rsuffix="_raw_edaq", how="outer")
+        # self.sync_df = inca_df.loc[0:end_time].join(
+        #                        edaq_df.loc[0:end_time, edaq_df.columns.isin(
+        #                                             ["time", "gnd_speed"])],
+        #                  lsuffix="_raw_inca", rsuffix="_raw_edaq", how="outer")
 
         # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.join.html#pandas.DataFrame.join
         self.Doc.print("\nsync_df at end of sync:", True)
@@ -490,6 +515,17 @@ class SingleRun(object):
 
         # Maybe could use df.shift() here instead.
         # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.shift.html
+
+    def calc_gnd_speed(self):
+        # average LR and RR angular wheel speeds.
+        self.sync_df["wspd_avg"] = self.sync_df[["wspd_RR", "wspd_LR"]].mean(axis=1)
+
+        # convert to linear speed.
+        tire_circ = np.pi * TIRE_DIAM_IN * ROLLING_RADIUS_FACTOR # inches
+        gnd_spd_in_min = self.sync_df["wspd_avg"] * tire_circ
+        CHANNEL_UNITS["wspd_avg"] = CHANNEL_UNITS["wspd_RR"]
+
+        self.sync_df["gnd_speed"] = gnd_spd_in_min / (5280 * 12/60) # inches/min to mph
 
     def knit_pedal_gaps(self):
         """Finds any gaps in INCA pedal channel and fills them if pedal signal
@@ -565,12 +601,7 @@ class SingleRun(object):
         pass
 
     def add_cvt_ratio(self):
-        ROLLING_RADIUS_FACTOR = 0.965
-        TIRE_DIAM_IN = 18 # inches
         tire_circ = np.pi * TIRE_DIAM_IN * ROLLING_RADIUS_FACTOR # inches
-
-        AXLE_RATIO = 11.47
-        GEARBOX_RATIO = 1.95
 
         if self.get_run_type() == "SSRun":
             gnd_spd_in_min = self.abr_df["gnd_speed"] * 5280 * 12/60 # inches/min
@@ -1244,8 +1275,8 @@ class SSRun(SingleRun):
         ax1.plot(self.raw_inca_df.index, self.raw_inca_df["throttle"],
                                             color=color, label="Throttle (og)")
         plt.title("Run %s - Abridge Compare" % self.run_label, loc="left")
-        ax1.set_ylim([-20, 80]) # Shift throttle trace up
-        ax1.set_yticks([0, 20, 40, 60, 80])
+        ax1.set_ylim([-25, 100]) # Shift throttle trace up
+        ax1.set_yticks([0, 20, 40, 60, 80, 100])
         ax1.set_ylabel("Throttle (deg)", color=color)
         ax1.tick_params(axis="y", labelcolor=color)
         # plt.grid(True)
@@ -1272,8 +1303,8 @@ class SSRun(SingleRun):
         plt.xlabel("Time (s)")
         # https://matplotlib.org/3.2.1/gallery/subplots_axes_and_figures/shared_axis_demo.html#sphx-glr-gallery-subplots-axes-and-figures-shared-axis-demo-py
 
-        ax3.set_ylim([-20, 80]) # scale down pedal switch
-        ax3.set_yticks([0, 20, 40, 60, 80])
+        ax3.set_ylim([-25, 100]) # scale down pedal switch
+        ax3.set_yticks([0, 20, 40, 60, 80, 100])
         ax3.set_ylabel("Throttle (deg)", color=color)
         ax3.tick_params(axis="y", labelcolor=color)
 
@@ -1325,8 +1356,8 @@ class SSRun(SingleRun):
         # Convert DF indices from hundredths of a second to seconds
         plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["throttle"],
                                             label="Throttle", color=color)
-        ax3.set_ylim([-20, 80]) # Shift throttle trace up
-        ax3.set_yticks([0, 20, 40, 60, 80])
+        ax3.set_ylim([-25, 100]) # Shift throttle trace up
+        ax3.set_yticks([0, 20, 40, 60, 80, 100])
         ax3.set_xlabel("Time (s)")
         ax3.set_ylabel("Throttle (deg)", color=color)
         ax3.tick_params(axis="y", labelcolor=color)
@@ -1736,8 +1767,8 @@ class DownhillRun(SingleRun):
         ax3 = plt.subplot(313, sharex=ax1)
         color = "tab:purple"
         ax3.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["throttle"], color=color)
-        ax3.set_ylim([-20, 80]) # Shift throttle trace up
-        ax3.set_yticks([0, 20, 40, 60, 80])
+        ax3.set_ylim([-25, 100]) # Shift throttle trace up
+        ax3.set_yticks([0, 20, 40, 60, 80, 100])
 
         ax3.set_xlabel("Time (s)")
         ax3.set_ylabel("Throttle (deg)", color=color)
