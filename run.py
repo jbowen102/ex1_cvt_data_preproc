@@ -5,6 +5,10 @@ import argparse     # Used to parse optional command-line arguments
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 # https://stackoverflow.com/questions/15777951/how-to-suppress-pandas-future-warning
+# https://stackoverflow.com/questions/18603270/progress-indicator-during-pandas-operations
+# https://pypi.org/project/tqdm/#pandas-integration
+# Gives warning if tqdm version <4.33.0). Ignore.
+# https://github.com/tqdm/tqdm/issues/780
 import pandas as pd # Series and DataFrame structures
 import numpy as np
 import traceback
@@ -27,11 +31,6 @@ except ImportError:
     PLOT_LIB_PRESENT = False
 # https://stackoverflow.com/questions/3496592/conditional-import-of-modules-in-python
 print("...done\n")
-
-# https://stackoverflow.com/questions/18603270/progress-indicator-during-pandas-operations
-# https://pypi.org/project/tqdm/#pandas-integration
-# Gives warning if tqdm version <4.33.0). Ignore.
-# https://github.com/tqdm/tqdm/issues/780
 
 # global constants
 RAW_INCA_DIR = "./raw_data/INCA"
@@ -72,10 +71,11 @@ class DataTrimError(Exception):
 
 class RunGroup(object):
     """Represents a collection of runs from the raw_data directory."""
-    def __init__(self, log_dir, process_all=False, verbose=False):
+    def __init__(self, log_dir, process_all=False, verbose=False, warn=False):
         # create SingleRun object for each run but don't read in data yet.
         self.log_dir = log_dir
         self.verbosity = verbose
+        self.warn_p = warn
         self.build_run_dict()
         self.process_runs(process_all)
 
@@ -89,14 +89,11 @@ class RunGroup(object):
         self.run_dict = {}
         # eliminate any directories that might be in the list
 
-        decel_runs = []
         for i, file in enumerate(INCA_files):
             if os.path.isdir(os.path.join(RAW_INCA_DIR, file)):
                 continue # ignore any directories found
 
             if "decel" in file.lower() or "deccel" in file.lower():
-                # decel_runs.append(file)
-                # continue
                 try:
                     ThisRun = self.create_downhill_run(file)
                 except FilenameError as exception_text:
@@ -139,18 +136,13 @@ class RunGroup(object):
 
             self.run_dict[ThisRun.get_run_label()] = ThisRun
 
-        if decel_runs:
-            print("Skipping these files because program can't process decel "
-                                                                "runs yet:")
-            for run in decel_runs:
-                print("\t%s" % run)
-            input("Press Enter to acknowledge.")
-
     def create_ss_run(self, filename):
-        return SSRun(os.path.join(RAW_INCA_DIR, filename), self.verbosity)
+        return SSRun(os.path.join(RAW_INCA_DIR, filename), self.verbosity,
+                                                                    self.warn_p)
 
     def create_downhill_run(self, filename):
-        return DownhillRun(os.path.join(RAW_INCA_DIR, filename), self.verbosity)
+        return DownhillRun(os.path.join(RAW_INCA_DIR, filename), self.verbosity,
+                                                                    self.warn_p)
 
     def process_runs(self, process_all=False):
         if process_all:
@@ -261,9 +253,9 @@ class SingleRun(object):
     """Represents a single run from the raw_data directory.
     No data is read in until read_data() called.
     """
-    def __init__(self, INCA_path, verbose=False):
+    def __init__(self, INCA_path, verbose=False, warn_prompt=False):
         # Create a new object to store and print output info
-        self.Doc = Output(verbose)
+        self.Doc = Output(verbose, warn_prompt)
         self.INCA_path = INCA_path
         self.INCA_filename = os.path.basename(self.INCA_path)
         self.parse_run_num()
@@ -1009,15 +1001,15 @@ class SSRun(SingleRun):
         if not valid_event_times:
             # If no times were stored, then alert user but continue with
             # program.
-            self.Doc.print("\nNo valid pedal-down events found in run %s "
-                                "(Criteria: throttle >%d deg for >%ds total)."
+            self.Doc.warn("No valid pedal-down events found in run %s "
+                                "(Criteria: throttle >%d deg for >%ds total).\n"
+                                "Processing will continue without abridging."
                     % (self.run_label, self.THRTL_THRESH, self.THRTL_T_THRESH))
-            input("Press Enter to acknowledge and continue processing data without abridging.")
-            self.abr_df = self.sync_df.copy(deep=True)
-
             self.meta_str += ("No valid pedal-down events found in run. "
                 "(Criteria: throttle >%d deg for >%ds total). Data unabridged. | "
                                     % (self.THRTL_THRESH, self.THRTL_T_THRESH))
+
+            self.abr_df = self.sync_df.copy(deep=True)
             return
         else:
             # Document in output file
@@ -1409,10 +1401,10 @@ class DownhillRun(SingleRun):
         if len(valid_times) == 0:
             # If no times were stored, then alert user but continue with
             # program.
-            self.Doc.print("\nNo valid downhill events found in run %s (Criteria: "
-            "speed slope >%d mph/s, speed >%d mph, and throttle <%d deg)."
-                % (self.run_label, gs_slope_cr, gspd_cr, throttle_cr))
-            input("Press Enter to acknowledge and continue processing data without abridging.")
+            self.Doc.warn("No valid downhill events found in run %s (Criteria: "
+                "speed slope >%d mph/s, speed >%d mph, and throttle <%d deg).\n"
+                                   "Processing will continue without abridging."
+                        % (self.run_label, gs_slope_cr, gspd_cr, throttle_cr))
             # Take care of needed assignments that are typically down below.
             self.sync_df["gs_rolling_avg"] = gs_rolling_avg
             self.sync_df["gs_rolling_slope"] = gs_rolling_slope
@@ -1459,20 +1451,21 @@ class DownhillRun(SingleRun):
         if not valid_slopes:
             # If no times were stored, then alert user but continue with
             # program.
-            self.Doc.print("\nNo valid downhill events found in run %s (Criteria: "
-            "speed slope >%d mph/s, speed >%d mph, and throttle <%d deg for >%ds)."
-                % (self.run_label, gs_slope_cr, gspd_cr, throttle_cr, gs_slope_t_cr))
-            input("Press Enter to acknowledge and continue processing data without abridging.")
+            self.Doc.print("\nNo valid downhill events found in run %s "
+            "(Criteria: speed slope >%d mph/s, speed >%d mph, and throttle <%d "
+                "deg for >%ds).\nProcessing will continue without abridging."
+            % (self.run_label, gs_slope_cr, gspd_cr, throttle_cr, gs_slope_t_cr))
+            self.meta_str += ("No valid downhill events found in run (Criteria: "
+            "speed slope >%d mph/s, speed >%d mph, and throttle <%d deg for "
+            ">%ds). Data unabridged. | "
+                          % (gs_slope_cr, gspd_cr, throttle_cr, gs_slope_t_cr))
+
             self.sync_df["gs_rolling_avg"] = gs_rolling_avg
             self.sync_df["gs_rolling_slope"] = gs_rolling_slope
             self.sync_df["downhill_filter"] = downhill_filter
             self.sync_df["trendlines"] = np.nan
             self.sync_df["slopes"] = np.nan
             self.abr_df = self.sync_df.copy(deep=True)
-
-            self.meta_str += ("No valid downhill events found in run (Criteria: "
-            "speed slope >%d mph/s, speed >%d mph, and throttle <%d deg for >%ds). "
-            "Data unabridged. | " % (gs_slope_cr, gspd_cr, throttle_cr, gs_slope_t_cr))
             return
         else:
             # Document in output file
@@ -1765,21 +1758,36 @@ class DownhillRun(SingleRun):
 
 
 class Output(object):
-    def __init__(self, verbose):
+    def __init__(self, verbose, warn_p):
         self.verbose = verbose
+        self.warn_prompt = warn_p
         self.log_string = ""
+
     def print(self, string, verbose_only=False):
         if verbose_only and not self.verbose:
+            # Add everything to log even if not output to screen.
+            self.add_to_log(string)
             return
         else:
-            self.log_string += string + "\n"
+            self.add_to_log(string)
             print(string)
+
+    def add_to_log(self, string):
+        self.log_string += string + "\n"
+
+    def warn(self, warn_string):
+        # Add to log and display in terminal.
+        self.print("\nWarning: " + warn_string)
+        if self.warn_prompt:
+            input("Press Enter to continue.")
+        else:
+            self.print("")
+
     def get_log_dump(self):
         return self.log_string
 
 
 def main_prog():
-
     # Find Desktop path
     username = getpass.getuser()
     # https://stackoverflow.com/questions/842059/is-there-a-portable-way-to-get-the-current-username-in-python
@@ -1811,11 +1819,13 @@ def main_prog():
     parser.add_argument("-l", "--log-dir", help="Specify a directory where log "
         "file containing that run's output and error trace should be saved when "
                         "error encountered.", type=str, default=desktop_path)
+    parser.add_argument("-i", "--ignore-warn", help="Do not prompt user to "
+                                "acknowledge warnings.", action="store_false")
 
     # https://www.programcreek.com/python/example/748/argparse.ArgumentParser
     args = parser.parse_args()
 
-    AllRuns = RunGroup(args.log_dir, args.auto, args.verbose)
+    AllRuns = RunGroup(args.log_dir, args.auto, args.verbose, args.ignore_warn)
 
     if args.plot and PLOT_LIB_PRESENT:
         if not os.path.exists(PLOT_DIR):

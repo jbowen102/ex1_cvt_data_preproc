@@ -88,7 +88,7 @@ mkdir "${REMOTE_SYNC}/${TIMESTAMP}"
 cd ~/ex1_cvt_data_preproc # Need to be in the project dir for the Python script to run its main function.
 
 printf "\nStarting Python script:\n"
-python3 run.py --auto --over --plot --log-dir "${REMOTE_SYNC}/${TIMESTAMP}"
+python3 run.py --auto --over --plot --ignore-warn --log-dir "${REMOTE_SYNC}/${TIMESTAMP}"
 PYTHON_RETURN=$? # gets return value of last command executed.
 printf "Finished Python script.\n"
 
