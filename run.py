@@ -304,16 +304,20 @@ class SingleRun(object):
                 "num.\nThis will cause problems with successive runs until you "
                 "fix the filename or remove the offending file from %s."
                                                     % (eDAQ_run, RAW_EDAQ_DIR))
-            if run_num_i == eDAQ_file_num:
-                # break out of loop while "eDAQ_run" is set to correct filename
+            if run_num_i == eDAQ_file_num and not found_eDAQ:
+                target_edaq_run = eDAQ_run
                 found_eDAQ = True
-                break
-                # There is no checking for multiple eDAQ files with same run
-                # num. The first one found will be used.
+            elif run_num_i == eDAQ_file_num:
+                # Duplicate found
+                raise FilenameError("More than one eDAQ file with '%s' "
+                    "designation. This will cause problems with successive runs "
+                    "until you remove duplicate files from %s."
+                                            % (eDAQ_file_num, RAW_EDAQ_DIR))
+
         if found_eDAQ:
-            self.eDAQ_path = os.path.join(RAW_EDAQ_DIR, eDAQ_run)
+            self.eDAQ_path = os.path.join(RAW_EDAQ_DIR, target_edaq_run)
             # Document in metadata string for later file output.
-            self.meta_str += "eDAQ file: '%s' | " % eDAQ_run
+            self.meta_str += "eDAQ file: '%s' | " % target_edaq_run
         else:
             raise FilenameError("No eDAQ file found for run %s" % eDAQ_file_num)
 
@@ -677,10 +681,10 @@ class SingleRun(object):
                     self.math_df["trendlines"], color=color, zorder=1, scaley=False)
             ax1.set_ylim(ylims)
             ax1.text(ax1.get_xlim()[0], ax1.get_ylim()[1]*9/10,
-              " Eng-on: " + str(round(self.math_df.at[0, "accel_avg_calc_eng_on"], 2)),
+              " Eng-on: %.2f" % self.math_df.at[0, "accel_avg_calc_eng_on"],
                                                 color=color, fontsize="x-small")
             ax1.text(ax1.get_xlim()[0], ax1.get_ylim()[1]*8/10,
-              " Eng-off: " + str(round(self.math_df.at[0, "accel_avg_calc_eng_off"], 2)),
+              " Eng-off: %.2f" % self.math_df.at[0, "accel_avg_calc_eng_off"],
                                                 color=color, fontsize="x-small")
 
             # https://stackoverflow.com/questions/7386872/make-matplotlib-autoscaling-ignore-some-of-the-plots
