@@ -275,7 +275,9 @@ class SingleRun(object):
         self.read_data()
         self.sync_data()
         if int(self.run_label[:2]) > 5:
-            self.calc_gnd_speed() # only needed for torque-meter runs.
+            # only needed for torque-meter runs.
+            self.combine_torque()
+            self.calc_gnd_speed()
         self.abridge_data()
         self.add_math_channels()
 
@@ -490,10 +492,6 @@ class SingleRun(object):
                edaq_df.loc[0:end_time, edaq_df.drop(
                                     columns=["pedal_v", "pedal_sw"]).columns],
                          lsuffix="_raw_inca", rsuffix="_raw_edaq", how="outer")
-        # self.sync_df = inca_df.loc[0:end_time].join(
-        #                        edaq_df.loc[0:end_time, edaq_df.columns.isin(
-        #                                             ["time", "gnd_speed"])],
-        #                  lsuffix="_raw_inca", rsuffix="_raw_edaq", how="outer")
 
         # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.join.html#pandas.DataFrame.join
         self.Doc.print("\nsync_df at end of sync:", True)
@@ -516,14 +514,24 @@ class SingleRun(object):
         # Maybe could use df.shift() here instead.
         # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.shift.html
 
+    def combine_torque(self):
+        # sum LR and RR wheel torque readings.
+        tq_sum = wspd_avg = self.sync_df[["wtq_RR", "wtq_LR"]].sum(axis=1)
+
+        # Remove original columns and replace with combined one.
+        self.sync_df.drop(columns=["wtq_RR", "wtq_LR"], inplace=True)
+        self.sync_df["rear_wtq_combined"] = tq_sum
+        CHANNEL_UNITS["rear_wtq_combined"] = CHANNEL_UNITS["wtq_RR"]
+
     def calc_gnd_speed(self):
         # average LR and RR angular wheel speeds.
-        self.sync_df["wspd_avg"] = self.sync_df[["wspd_RR", "wspd_LR"]].mean(axis=1)
+        wspd_avg = self.sync_df[["wspd_RR", "wspd_LR"]].mean(axis=1)
+        # Remove wheel speed channels since we don't want them written to sync file.
+        self.sync_df.drop(columns=["wspd_RR", "wspd_LR"], inplace=True)
 
         # convert to linear speed.
         tire_circ = np.pi * TIRE_DIAM_IN * ROLLING_RADIUS_FACTOR # inches
-        gnd_spd_in_min = self.sync_df["wspd_avg"] * tire_circ
-        CHANNEL_UNITS["wspd_avg"] = CHANNEL_UNITS["wspd_RR"]
+        gnd_spd_in_min = wspd_avg * tire_circ
 
         self.sync_df["gnd_speed"] = gnd_spd_in_min / (5280 * 12/60) # inches/min to mph
 
@@ -562,7 +570,8 @@ class SingleRun(object):
 
         self.Doc.print("\nContinuous INCA sample gaps: ")
         for range in gap_ranges:
-            self.Doc.print("\t" + " ->\t".join(str(t) for t in range))
+            self.Doc.print("\t%0.2f\t->\t%0.2f"
+                        % (range[0] / SAMPLING_FREQ, range[1] / SAMPLING_FREQ))
         # https://stackoverflow.com/questions/973568/convert-nested-lists-to-string
 
         for range in gap_ranges:
@@ -577,8 +586,8 @@ class SingleRun(object):
                                  and self.sync_df.at[post_time, "pedal_sw"]):
                 # Only need to knit gap if pedal was actuated before gap and
                 # still actuated after. Assume no interruption during gap.
-                self.Doc.print("\nKnitting pedal event in gap %d -> %d"
-                                                        % (range[0], range[-1]))
+                self.Doc.print("\nKnitting pedal event in gap %0.2f -> %0.2f"
+                        % (range[0] / SAMPLING_FREQ, range[-1] / SAMPLING_FREQ))
 
                 self.sync_df.at[range[0]:range[1]+1, "pedal_sw"] = 1
                 knit = True
