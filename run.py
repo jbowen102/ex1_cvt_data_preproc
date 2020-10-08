@@ -1257,10 +1257,6 @@ class SSRun(SingleRun):
         # https://stackoverflow.com/questions/13842088/set-value-for-particular-cell-in-pandas-dataframe-using-index
         # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.at.html
 
-        self.Doc.print("\nabr_df after adding steady-state data:", True)
-        self.Doc.print(self.abr_df.to_string(max_rows=10, max_cols=7,
-                                                    show_dimensions=True), True)
-
         # pandas rolling(), apply(), regression references:
         # https://stackoverflow.com/questions/47390467/pandas-dataframe-rolling-with-two-columns-and-two-rows
         # https://pandas.pydata.org/pandas-docs/version/0.23.4/whatsnew.html#rolling-expanding-apply-accepts-raw-false-to-pass-a-series-to-the-function
@@ -1676,7 +1672,10 @@ class DownhillRun(SingleRun):
         del self.abr_df["gs_rolling_slope"]
         del self.abr_df["downhill_filter"]
         del self.abr_df["trendlines"]
-        del self.abr_df["slopes"]
+
+        # Keep the slopes channel for later export.
+        self.abr_df.rename(columns={"slopes": "gnd_speed_reg_slope"}, inplace=True)
+        CHANNEL_UNITS["gnd_speed_reg_slope"] = CHANNEL_UNITS["gnd_speed"] + "/s"
 
         self.add_cvt_ratio()
         self.add_downhill_avgs()
@@ -1719,10 +1718,6 @@ class DownhillRun(SingleRun):
                                 % self.math_df.at[0, "accel_avg_calc_eng_on"])
         self.Doc.print("Engine-off downhill accel: %.2f"
                                 % self.math_df.at[0, "accel_avg_calc_eng_off"])
-
-        self.Doc.print("\nabr_df after adding steady-state data:", True)
-        self.Doc.print(self.abr_df.to_string(max_rows=10, max_cols=7,
-                                                    show_dimensions=True), True)
 
     def plot_data(self, overwrite=False, description=""):
         # This performs all the actions in the parent class's method
