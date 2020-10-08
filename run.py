@@ -7,7 +7,7 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 # https://stackoverflow.com/questions/15777951/how-to-suppress-pandas-future-warning
 # https://stackoverflow.com/questions/18603270/progress-indicator-during-pandas-operations
 # https://pypi.org/project/tqdm/#pandas-integration
-# Gives warning if tqdm version <4.33.0). Ignore.
+# Gives warning if tqdm version <4.33.0. Ignore.
 # https://github.com/tqdm/tqdm/issues/780
 import pandas as pd # Series and DataFrame structures
 import numpy as np
@@ -37,7 +37,7 @@ RAW_INCA_DIR = "./raw_data/INCA"
 RAW_EDAQ_DIR = "./raw_data/eDAQ"
 SYNC_DIR = "./sync_data"
 PLOT_DIR = "./figs"
-# Find Desktop path, default destination for log files
+# Find Desktop path, default destination for log files.
 username = getpass.getuser()
 # https://stackoverflow.com/questions/842059/is-there-a-portable-way-to-get-the-current-username-in-python
 home_contents = os.listdir("/mnt/c/Users/%s" % username)
@@ -87,21 +87,20 @@ class DataSyncError(Exception):
 class RunGroup(object):
     """Represents a collection of runs from the raw_data directory."""
     def __init__(self, process_all=False, verbose=False, warn=False):
-        # create SingleRun object for each run but don't read in data yet.
         self.verbosity = verbose
         self.warn_p = warn
+        # create SingleRun object for each run but don't read in data yet.
         self.build_run_dict()
         self.process_runs(process_all)
 
     def build_run_dict(self):
-        """Create dictionary with an entry for each INCA run in raw_data dir."""
+        """Creates dictionary with an entry for each INCA run in raw_data dir."""
         if not os.path.exists(RAW_INCA_DIR):
             raise DataReadError("No raw INCA directory found. Put data in this "
                                                 "folder: %s" % RAW_INCA_DIR)
         INCA_files = os.listdir(RAW_INCA_DIR)
         INCA_files.sort()
         self.run_dict = {}
-        # eliminate any directories that might be in the list
 
         for i, file in enumerate(INCA_files):
             if os.path.isdir(os.path.join(RAW_INCA_DIR, file)):
@@ -115,7 +114,7 @@ class RunGroup(object):
                     # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
                     input("\nRun creation failed with file '%s'.\n"
                           "Press Enter to skip this run." % (file))
-                    print("")
+                    print("") # blank line
                     continue # Don't add to run dict
 
             else:
@@ -126,7 +125,7 @@ class RunGroup(object):
                     # https://stackoverflow.com/questions/1483429/how-to-print-an-exception-in-python
                     input("\nRun creation failed with file '%s'.\n"
                           "Press Enter to skip this run." % (file))
-                    print("")
+                    print("") # blank line
                     continue # Don't add to run dict
 
             if ThisRun.get_run_label() in self.run_dict:
@@ -142,7 +141,7 @@ class RunGroup(object):
                          file, ThisRun.get_run_label()))
                     dup_answ = input("> ")
                 if dup_answ.lower() == "1":
-                    print("")
+                    print("") # blank line
                     continue
                 if dup_answ.lower() == "2":
                     # fall through
@@ -159,6 +158,7 @@ class RunGroup(object):
                                                                     self.warn_p)
 
     def process_runs(self, process_all=False):
+        """Processes all runs in RunGroup."""
         if process_all:
             # automatically process all INCA runs (below)
             self.runs_to_process = self.run_dict
@@ -184,11 +184,13 @@ class RunGroup(object):
                 self.runs_to_process.pop(bad_run)
 
     def plot_runs(self, overwrite=False, desc_str=""):
-        # If only one run in group is to be processed, this will only loop once.
+        """Creates plots for all runs in RunGroup."""
         if not self.runs_to_process:
             print("\nNo valid runs to plot.\n")
             return
         bad_runs = []
+
+        # If only one run in group is to be processed, this will only loop once.
         for run_num in self.runs_to_process:
             RunObj = self.runs_to_process[run_num]
             try:
@@ -205,11 +207,13 @@ class RunGroup(object):
                 self.runs_to_process.pop(bad_run)
 
     def export_runs(self, overwrite=False, desc_str=""):
-        # If only one run in group is to be processed, this will only loop once.
+        """Exports data for all runs in RunGroup."""
         if not self.runs_to_process:
             print("\nNo valid runs to export.\n")
             return
         bad_runs = []
+
+        # If only one run in group is to be processed, this will only loop once.
         for run_num in self.runs_to_process:
             RunObj = self.runs_to_process[run_num]
             try:
@@ -227,7 +231,7 @@ class RunGroup(object):
 
     def prompt_for_run(self):
         """Prompts user for what run to process
-        Returns SingleRun object"""
+        Returns SingleRun object."""
         run_prompt = "Enter run num (four digits)\n> "
         target_run_num = input(run_prompt)
         while len(target_run_num) != 4:
@@ -243,7 +247,7 @@ class RunGroup(object):
 
 class SingleRun(object):
     """Represents a single run from the raw_data directory.
-    No data is read in until read_data() called.
+    No data is read in until read_data() method called.
     """
     def __init__(self, INCA_path, verbose=False, warn_prompt=False):
         # Create a new object to store and print output info
@@ -268,10 +272,11 @@ class SingleRun(object):
             "characters that follow the first underscore to be run num."
                                                         % self.INCA_filename)
 
-        # Metadata string to document in outuput file
+        # Create metadata string to document in outuput file
         self.meta_str = "INCA_file: '%s' | " % self.INCA_filename
 
     def process_data(self):
+        """Run all processing methods on run data."""
         self.read_data()
         self.sync_data()
         if int(self.run_label[:2]) > 5:
@@ -283,7 +288,6 @@ class SingleRun(object):
 
     def find_edaq_path(self, eDAQ_file_num):
         """Locate path to eDAQ file corresponding to INCA run num."""
-
         if not os.path.exists(RAW_EDAQ_DIR):
             raise DataReadError("No raw eDAQ directory found. Put data in this"
                                                 "folder: %s" % RAW_EDAQ_DIR)
@@ -293,7 +297,7 @@ class SingleRun(object):
             if os.path.isdir(os.path.join(RAW_EDAQ_DIR, eDAQ_run)):
                 continue # ignore any directories found
             # Split the extension off the file name, then isolate the final two
-            # numbers off the date
+            # numbers off the four-digit run num.
             try:
                 run_num_i = os.path.splitext(eDAQ_run)[0].split("_")[1][0:2]
             except IndexError:
@@ -322,7 +326,7 @@ class SingleRun(object):
             raise FilenameError("No eDAQ file found for run %s" % eDAQ_file_num)
 
     def read_data(self):
-        """Read in both INCA and eDAQ data from raw_data directory"""
+        """Read in both INCA and eDAQ data from raw_data directory."""
         eDAQ_file_num = self.run_label[0:2]
         self.find_edaq_path(eDAQ_file_num)
 
@@ -333,11 +337,10 @@ class SingleRun(object):
             self.edaq_channels = EDAQ_CHANNELS_5
 
         # Read in both eDAQ and INCA data for specific run.
-        # read INCA data first
-        # Open file with read priveleges.
+        # Read INCA data first
         # File automatically closed at end of "with/as" block.
         with open(self.INCA_path, "r") as inca_ascii_file:
-            self.Doc.print("\nReading INCA data from %s" % self.INCA_path) # debug
+            self.Doc.print("\nReading INCA data from %s" % self.INCA_path)
             INCA_file_in = csv.reader(inca_ascii_file, delimiter="\t")
             # https://stackoverflow.com/questions/7856296/parsing-csv-tab-delimited-txt-file-with-python
 
@@ -354,22 +357,20 @@ class SingleRun(object):
                         raw_inca_dict[channel].append(float(INCA_row[n]))
 
         # Convert the dict to a pandas DataFrame for easier manipulation
-        # and analysis
+        # and analysis.
         self.raw_inca_df = pd.DataFrame(data=raw_inca_dict,
                                                     index=raw_inca_dict["time"])
-        # https://datatofish.com/rename-columns-pandas-dataframe/
-
         self.Doc.print("...done")
+
         self.Doc.print("\nraw_inca_df after reading in data:", True)
         self.Doc.print(self.raw_inca_df.to_string(max_rows=10, max_cols=7,
                                                 show_dimensions=True), True)
         self.Doc.print("", True)
 
-        # now read eDAQ data
+        # Now read eDAQ data
         with open(self.eDAQ_path, "r") as edaq_ascii_file:
-            self.Doc.print("Reading eDAQ data from %s" % self.eDAQ_path) # debug
+            self.Doc.print("Reading eDAQ data from %s" % self.eDAQ_path)
             eDAQ_file_in = csv.reader(edaq_ascii_file, delimiter="\t")
-            # https://stackoverflow.com/questions/7856296/parsing-csv-tab-delimited-txt-file-with-python
 
             raw_edaq_dict = {}
             for channel in self.edaq_channels:
@@ -380,19 +381,18 @@ class SingleRun(object):
                     pass
                 elif j == EDAQ_HEADER_HT-1:
                     # The first row is a list of channel names.
-                    # Loop through and find the first channel for this run.
-
-                    # converting to int and back to str strips zero padding
+                    # Converting to int and back to str strips zero padding
                     sub_run_num = int(self.run_label[2:4])
                     edaq_sub_run = "RN_"+str(sub_run_num)
 
+                    # Loop through and find the first channel for this run.
                     for n, col in enumerate(eDAQ_row):
                         if edaq_sub_run in col:
                             edaq_run_start_col = n
                             break
 
                     if n == len(eDAQ_row) - 1:
-                        # got to end of row and didn't find the run in any
+                        # Got to end of row and didn't find the run in any
                         # column heading
                         raise DataReadError("Can't find %s in any eDAQ file" %
                                                                 edaq_sub_run)
@@ -402,15 +402,13 @@ class SingleRun(object):
                     # Time vector may keep going past a channel's data, so look
                     # at a run-specific channel to see if the run's ended.
 
-                    # Only add this run's channels to our data list.
-                    # Time is always in 1st column. Round to nearest hundredth.
+                    # Time is always in 1st column.
                     raw_edaq_dict["time"].append(float(eDAQ_row[0]))
                     for n, channel in enumerate(self.edaq_channels[1:]):
+                        # Only add this run's channels to our data list.
                         raw_edaq_dict[channel].append(
                                         float(eDAQ_row[edaq_run_start_col+n]))
 
-        # Convert the dict to a pandas DataFrame for easier manipulation
-        # and analysis
         self.raw_edaq_df = pd.DataFrame(data=raw_edaq_dict,
                                                     index=raw_edaq_dict["time"])
 
@@ -433,7 +431,8 @@ class SingleRun(object):
         self.shift_time_series(edaq_df, zero=True)
 
         # INCA time increments are slightly off, so error accumulates and
-        # can eventually cause issues.
+        # can eventually cause issues (alternating 0.00 and 0.02s periods
+        # after rounding).
         # Convert INCA to deltas by subtracting each time value from previous
         # one, rounding the delta and adding to the previous (rounded) value.
         # Calculate the rolling difference (delta) between each pair of vals.
@@ -455,7 +454,7 @@ class SingleRun(object):
             raise DataSyncError("No pedal event found in eDAQ data (looking for"
             " value of 1 in pedal switch column). Check input pedal data and "
             "ordering of input file's columns.")
-        # find first pedal switch event
+        # Find first pedal switch event.
         # https://stackoverflow.com/questions/16683701/in-pandas-how-to-get-the-index-of-a-known-value
         inca_high_start_t = inca_df.loc[inca_df["pedal_sw"] == 1].index[0]
         edaq_high_start_t = edaq_df.loc[edaq_df["pedal_sw"] == 1].index[0]
@@ -464,17 +463,16 @@ class SingleRun(object):
                                        edaq_high_start_t / SAMPLING_FREQ), True)
 
         # Test first to see if either data set has first pedal event earlier
-        # than 1s. If so, that's the new time for both files to line up at.
+        # than 1s. If so, that's the new time for both files to align on.
         start_buffer = min([1 * SAMPLING_FREQ, inca_high_start_t,
                                                             edaq_high_start_t])
         self.Doc.print("Start buffer: %0.2fs"
                                            % (start_buffer/SAMPLING_FREQ), True)
 
-        # shift time values, leaving negative values in early part of file that
+        # Shift time values, leaving negative values in early part of file that
         # will be trimmed off below.
         inca_target_t = inca_high_start_t - start_buffer
         edaq_target_t = edaq_high_start_t - start_buffer
-
         self.shift_time_series(inca_df, offset_val=-inca_target_t)
         self.shift_time_series(edaq_df, offset_val=-edaq_target_t)
         self.Doc.print("First INCA sample shifted to time %0.2fs"
@@ -482,11 +480,11 @@ class SingleRun(object):
         self.Doc.print("First eDAQ sample shifted to time %0.2fs"
                                     % (edaq_df.index[0]/SAMPLING_FREQ), True)
 
-        # Unify datasets into one DataFrame
+        # Unify datasets into one DataFrame/
         # Slice out values before t=0 (1s before first pedal press)
         # Truncate file with extra time vals at end. Will not happen during
         # join() because of the "outer" option creating union to catch any
-        # time gaps in either dataset (have only seen it in one INCA run so far).
+        # time gaps in either dataset (has happened in INCA runs).
         end_time = min(inca_df.index[-1], edaq_df.index[-1])
 
         # Leave out redundant channels in eDAQ data.
@@ -512,14 +510,11 @@ class SingleRun(object):
             raise DataSyncError("shift_time_series needs either zero or "
                                                     "offset_val param.")
 
-        shifted_time_series = df.index + offset_val
-        df.set_index(shifted_time_series, inplace=True)
-
-        # Maybe could use df.shift() here instead.
-        # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.shift.html
+        df.set_index(df.index + offset_val, inplace=True)
 
     def combine_torque(self):
-        # sum LR and RR wheel torque readings.
+        """Sums LR and RR wheel torque readings.
+        Used when processing runs 06xx+ that use torque meters."""
         tq_sum = wspd_avg = self.sync_df[["wtq_RR", "wtq_LR"]].sum(axis=1)
 
         # Remove original columns and replace with combined one.
@@ -528,12 +523,13 @@ class SingleRun(object):
         CHANNEL_UNITS["rear_wtq_combined"] = CHANNEL_UNITS["wtq_RR"]
 
     def calc_gnd_speed(self):
-        # average LR and RR angular wheel speeds.
+        """Averages LR and RR angular wheel speeds.
+        Used when processing runs 06xx+ that use torque meters."""
         wspd_avg = self.sync_df[["wspd_RR", "wspd_LR"]].mean(axis=1)
         # Remove wheel speed channels since we don't want them written to sync file.
         self.sync_df.drop(columns=["wspd_RR", "wspd_LR"], inplace=True)
 
-        # convert to linear speed.
+        # Convert to linear speed.
         tire_circ = np.pi * TIRE_DIAM_IN * ROLLING_RADIUS_FACTOR # inches
         gnd_spd_in_min = wspd_avg * tire_circ
 
@@ -614,6 +610,7 @@ class SingleRun(object):
         pass
 
     def add_cvt_ratio(self):
+        """Calculate instantaneous CVT ratio and include in abridged dataframe."""
         tire_circ = np.pi * TIRE_DIAM_IN * ROLLING_RADIUS_FACTOR # inches
 
         if self.get_run_type() == "SSRun":
@@ -637,10 +634,12 @@ class SingleRun(object):
         CHANNEL_UNITS["CVT_ratio_calc"] = "rpm/rpm"
 
     def plot_data(self, overwrite=False, description=""):
+        """Plot various raw and calculated data from run.
+        Child classes add to this."""
         self.overwrite = overwrite
         self.description = description
-        self.Doc.print("")
-        # https://stackoverflow.com/questions/18028504/python-is-adding-extra-newline-to-the-output
+        self.Doc.print("") # blank line
+
         self.plot_abridge_compare()
         self.plot_cvt_ratio()
 
@@ -650,7 +649,8 @@ class SingleRun(object):
         pass
 
     def plot_cvt_ratio(self):
-        # Plot vehicle speed, filtered speed, engine speed, CVT ratio
+        """Plot calculated CVT ratio along with other data for evaluation."""
+
         ax1 = plt.subplot(311)
         # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
 
@@ -770,12 +770,14 @@ class SingleRun(object):
                 for filepath in glob.glob(wildcard_filename):
                     os.remove(filepath)
                 # continue with rest of function
-            if ow_answer.lower() == "n":
+            elif ow_answer.lower() == "n":
                 # plot will be cleared in caller function.
                 return
         elif glob.glob(wildcard_filename) and self.overwrite:
             for filepath in glob.glob(wildcard_filename):
                 os.remove(filepath)
+                # Must manually remove because if figure hash changes, it will
+                # not overwrite original.
 
         plt.savefig(fig_filepath)
         # Calculate unique hash value (like a fingerprint) to output in CSV's
@@ -791,6 +793,8 @@ class SingleRun(object):
                                                             % (type, hash_text))
 
     def export_data(self, overwrite=False, description=""):
+        """Output CSV file with synced and abridged data, including some
+        calculated channels and aggregated values."""
         self.overwrite = overwrite
         self.description = description
 
@@ -819,21 +823,20 @@ class SingleRun(object):
             CHANNEL_UNITS["accel_avg_calc_eng_on"] = CHANNEL_UNITS["gnd_speed"] + "/s"
             CHANNEL_UNITS["accel_avg_calc_eng_off"] = CHANNEL_UNITS["accel_avg_calc_eng_on"]
 
-        # Create to list of lists for easier writing out
+        # Replace any NaNs with blanks
+        export_df.fillna("", inplace=True)
+        # https://stackoverflow.com/questions/26837998/pandas-replace-nan-with-blank-empty-string
+
+        # Convert to list of lists for easier writing out
+        sync_array = export_df.values.tolist()
+        # https://stackoverflow.com/questions/28006793/pandas-dataframe-to-list-of-lists
+
         # Convert time values from hundredths of a second to seconds
         time_series = [round(ti/SAMPLING_FREQ,2)
                                     for ti in export_df.index.tolist()]
 
-        # # Replace any NaNs with blanks
-        export_df.fillna("", inplace=True)
-        # https://stackoverflow.com/questions/26837998/pandas-replace-nan-with-blank-empty-string
-
-        sync_array = export_df.values.tolist()
-        # https://stackoverflow.com/questions/28006793/pandas-dataframe-to-list-of-lists
-
-        # for line_no, inca_line in enumerate(sync_array):
         for line_no, line in enumerate(sync_array):
-            # put in time values
+            # prepend time values
             sync_array[line_no].insert(0, time_series[line_no])
             # https://stackoverflow.com/questions/8537916/whats-the-idiomatic-syntax-for-prepending-to-a-short-python-list
 
@@ -867,7 +870,7 @@ class SingleRun(object):
 
         # Create new CSV file and write out. Closes automatically at end of
         # with/as block.
-        # This block should not run if answered no to overwrite above.
+        # This block does not run if answered no to overwrite above.
         with open(sync_filename, 'w+') as sync_file:
             sync_file_csv = csv.writer(sync_file, dialect="excel")
 
@@ -884,19 +887,18 @@ class SingleRun(object):
         # https://stackoverflow.com/questions/415511/how-to-get-the-current-time-in-python
         filename = "%s_Run%s_%s_error.txt" % (timestamp, self.get_run_label(),
                                                             operation.lower())
-        print(exception_trace)
+        self.Doc.print(exception_trace)
         # Wait one second to prevent overwriting previous error if it occurred less
         # than one second ago.
         time.sleep(1)
         full_path = os.path.join(LOG_DIR, filename)
         with open(full_path, "w") as log_file:
-            log_file.write(self.get_output().get_log_dump() + exception_trace)
+            log_file.write(self.get_output().get_log_dump())
 
         input("\n%s failed on run %s.\nOutput and exception "
             "trace written to '%s'.\nPress Enter to skip this run."
                                 % (operation, self.get_run_label(), full_path))
-        print("")
-
+        print("") # blank line
 
     def get_run_label(self):
         return self.run_label
@@ -905,7 +907,7 @@ class SingleRun(object):
         return self.INCA_filename
 
     def get_meta_str(self):
-        # Removing trailing delimiter
+        # Remove trailing delimiter
         return self.meta_str[:-3]
 
     def get_output(self):
@@ -919,23 +921,17 @@ class SingleRun(object):
 
 
 class SSRun(SingleRun):
-    """Represents a single run with steady-state operation."""
-    # def __init__(self, INCA_path):
-    #     # This performs all the actions in the parent class's method.
-    #     SingleRun.__init__(self, INCA_path)
-    #     super(SSRun, self).__init__(INCA_path)
-        # https://stackoverflow.com/questions/5166473/inheritance-and-init-method-in-python
-        # https://stackoverflow.com/questions/222877/what-does-super-do-in-python
+    """Represents a single run with steady-state operation. INCA file name
+    determines SS vs. Downhill."""
 
     def abridge_data(self):
         """Isolates important events in data by removing any long stretches of
-        no pedal input of pedal events during which the throttle position >45
-        deg or whatever throttle threshold not sustained for >2 seconds (or
-        whatever time threshold).
+        no pedal input of pedal events during which the throttle position not
+        sustained above threshold for enough time.
         """
         # Define constants used to isolating valid events.
-        self.thrtl_thresh = 45 # degrees ("throttle threshold")
-        self.thrtl_t_thresh = 2 # seconds ("throttle time threshold")
+        thrtl_thresh = 45 # degrees ("throttle threshold")
+        thrtl_t_thresh = 2 # seconds ("throttle time threshold")
 
         # Need to repair any gaps in INCA samples. If pedal was actuated
         # when sampling cut out, and it was still actuated when the sampling
@@ -943,10 +939,8 @@ class SSRun(SingleRun):
         # when it likely wasn't.
         self.knit_pedal_gaps()
 
-        # list of start and end times for pedal-down events with a segment of >45deg
-        # throttle for >2s.
+        # list of start and end times for pedal-down events meeting criteria.
         valid_event_times = []
-
         # maintain a buffer of candidate pedal-down and throttle time vals.
         ped_buffer = []
         high_throttle_time = [0, 0]
@@ -958,7 +952,7 @@ class SSRun(SingleRun):
 
         for i, ti in enumerate(self.sync_df.index):
             # Main loop evaluates pedal-down event. Stores event start and end
-            # times if inner loop finds throttle was >45deg for >2s during event
+            # times if inner loop finds criteria met during event.
 
             if self.sync_df["pedal_sw"][ti] == 1:
                 if not pedal_down:
@@ -968,32 +962,32 @@ class SSRun(SingleRun):
                 pedal_down = True
                 ped_buffer.append(ti) # add current time to pedal buffer.
 
-                ## Calculate throttle >45 deg time to determine event validity
+                # Calculate throttle over-threshold time to determine event validity
                 if not counting and (self.sync_df["throttle"][ti] >
-                                                            self.thrtl_thresh):
-                    # first time throttle exceeds 45 deg
+                                                            thrtl_thresh):
+                    # first time throttle exceeds threshold
                     self.Doc.print("\t\tThrottle >%d deg at time\t%0.2fs" %
-                                        (self.thrtl_thresh, ti / SAMPLING_FREQ))
+                                        (thrtl_thresh, ti / SAMPLING_FREQ))
                     high_throttle_time[0] = ti
                     counting = True
 
                 elif counting and (self.sync_df["throttle"][ti] <
-                                                            self.thrtl_thresh):
-                    # throttle drops below 45 deg
+                                                            thrtl_thresh):
+                    # throttle drops below threshold
                     self.Doc.print("\t\tThrottle <%d deg at time\t%0.2fs" %
-                                        (self.thrtl_thresh, ti / SAMPLING_FREQ))
+                                        (thrtl_thresh, ti / SAMPLING_FREQ))
                     high_throttle_time[1] = self.sync_df.index[i-1] # prev. time
                     delta = high_throttle_time[1] - high_throttle_time[0]
                     self.Doc.print("\t\tThrottle >%d deg total t:\t%0.2fs" %
-                                    (self.thrtl_thresh, delta / SAMPLING_FREQ))
-                    # calculate if that >45deg event lasted longer than 2s.
+                                    (thrtl_thresh, delta / SAMPLING_FREQ))
+                    # calculate if that over-threshold event lasted long enough.
                     if (high_throttle_time[1] - high_throttle_time[0] >
-                                          self.thrtl_t_thresh * SAMPLING_FREQ):
+                                          thrtl_t_thresh * SAMPLING_FREQ):
                         # Multiplying by sampling f to get hundredths of a sec.
                         keep = True
-                        # now the times stored in ped_buffer constitute a valid
+                        # Now the times stored in ped_buffer constitute a valid
                         # event. As long as the pedal switch stays actuated,
-                        # subsequentn time indices will be added to ped_buffer.
+                        # subsequent time indices will be added to ped_buffer.
                     counting = False # reset indicator
                     high_throttle_time = [0, 0] # reset
 
@@ -1002,14 +996,14 @@ class SSRun(SingleRun):
                 # throttle angle drops below its threshold.
                 if counting:
                     self.Doc.print("\t(Pedal lifted before throttle dropped "
-                                          "below %d deg.)" % self.thrtl_thresh)
+                                          "below %d deg.)" % thrtl_thresh)
                     # similar to above code:
                     high_throttle_time[1] = self.sync_df.index[i-1] # prev. time
                     delta = high_throttle_time[1] - high_throttle_time[0]
                     self.Doc.print("\t\tThrottle >%d deg total t:\t%0.2fs" %
-                                     (self.thrtl_thresh, delta / SAMPLING_FREQ))
+                                     (thrtl_thresh, delta / SAMPLING_FREQ))
                     if (high_throttle_time[1] - high_throttle_time[0] >
-                                          self.thrtl_t_thresh * SAMPLING_FREQ):
+                                          thrtl_t_thresh * SAMPLING_FREQ):
                         keep = True
                     counting = False # reset indicator
                     high_throttle_time = [0, 0] # reset
@@ -1028,14 +1022,14 @@ class SSRun(SingleRun):
         # One last check in case pedal-down event was ongoing when file ended.
         if counting:
             self.Doc.print("\t(File ended before throttle dropped "
-                                  "below %d deg.)" % self.thrtl_thresh)
+                                  "below %d deg.)" % thrtl_thresh)
             # similar to above code:
             high_throttle_time[1] = self.sync_df.index[i-1] # prev. time
             delta = high_throttle_time[1] - high_throttle_time[0]
             self.Doc.print("\t\tThrottle >%d deg total t:\t%0.2fs" %
-                             (self.thrtl_thresh, delta / SAMPLING_FREQ))
+                             (thrtl_thresh, delta / SAMPLING_FREQ))
             if (high_throttle_time[1] - high_throttle_time[0] >
-                                  self.thrtl_t_thresh * SAMPLING_FREQ):
+                                  thrtl_t_thresh * SAMPLING_FREQ):
                 keep = True
             counting = False # reset indicator
             high_throttle_time = [0, 0] # reset
@@ -1050,10 +1044,10 @@ class SSRun(SingleRun):
             self.Doc.warn("No valid pedal-down events found in run %s "
                                 "(Criteria: throttle >%d deg for >%ds total).\n"
                                 "Processing will continue without abridging."
-                    % (self.run_label, self.thrtl_thresh, self.thrtl_t_thresh))
+                    % (self.run_label, thrtl_thresh, thrtl_t_thresh))
             self.meta_str += ("No valid pedal-down events found in run. "
                 "(Criteria: throttle >%d deg for >%ds total). Data unabridged. | "
-                                    % (self.thrtl_thresh, self.thrtl_t_thresh))
+                                    % (thrtl_thresh, thrtl_t_thresh))
 
             self.abr_df = self.sync_df.copy(deep=True)
             return
@@ -1061,19 +1055,18 @@ class SSRun(SingleRun):
             # Document in output file
             self.meta_str += ("Isolated events where throttle exceeded "
                 "%d deg for >%ds. Removed extraneous surrounding events. | "
-                                    % (self.thrtl_thresh, self.thrtl_t_thresh))
+                                    % (thrtl_thresh, thrtl_t_thresh))
 
         self.Doc.print("Valid steady-state ranges:")
         for event_time in valid_event_times:
             self.Doc.print("\t%0.2f\t->\t%0.2f"
                % (event_time[0] / SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
 
-        # Make sure if two >45 deg events (w/ pedal lift between) are closer
+        # Make sure if two valid events (w/ pedal lift between) are closer
         # than 5s, don't cut into either one. Look at each pair of end/start
         # points, and if they're closer than 5s, merge those two.
         valid_event_times_c = [ valid_event_times[0] ]
         for n, pair in enumerate(valid_event_times[1:]):
-            # self.Doc.print("\t%f - %f" % (pair[0], previous_pair[1]), True)
             earlier_pair = valid_event_times_c[-1]
             if pair[0] - earlier_pair[1] < (5 * SAMPLING_FREQ):
                 # Replace the two pairs with a single combined pair
@@ -1087,7 +1080,8 @@ class SSRun(SingleRun):
             self.Doc.print("\t%0.2f\t->\t%0.2f"
                 % (event_time[0]/SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
 
-        # add one-second buffer to each side of valid pedal-down events.
+        # Add one-second buffer to each side of valid pedal-down events.
+        # For more context.
         for n, pair in enumerate(valid_event_times_c):
             if n == 0 and pair[0] <= (1 * SAMPLING_FREQ):
                 # Set zero as start value if first time is less than 1s.
@@ -1095,8 +1089,7 @@ class SSRun(SingleRun):
             else:
                 new_start_i = self.sync_df.index.get_loc(
                                                 pair[0] - 1*SAMPLING_FREQ,
-                                                method="nearest", tolerance=1)
-            # tolerance is really (1/SAMPLING_FREQ)*SAMPLING_FREQ = 1
+                    method="nearest", tolerance=(1/SAMPLING_FREQ)*SAMPLING_FREQ)
 
             new_end_i = self.sync_df.index.get_loc(pair[1] + 1*SAMPLING_FREQ,
                                                             method="nearest")
@@ -1110,9 +1103,9 @@ class SSRun(SingleRun):
         for event_time in valid_event_times_c:
             self.Doc.print("\t%0.2f\t->\t%0.2f"
                % (event_time[0] / SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
-        self.Doc.print("")
+        self.Doc.print("") # blank line
 
-        # Split DataFrame into valid pieces; store in lists
+        # Split DataFrame into valid pieces; store in list
         valid_events = []
         desired_start_t = 0
         for n, time_range in enumerate(valid_event_times_c):
@@ -1129,7 +1122,7 @@ class SSRun(SingleRun):
             # Add events to lists
             valid_events.append(valid_event)
 
-            # define next start time to be next time value after new vector's
+            # Define next start time to be next time value after new vector's
             # end time.
             desired_start_t = time_range[1]-shift
 
@@ -1150,12 +1143,14 @@ class SSRun(SingleRun):
                  self.abr_df.index[-1]/SAMPLING_FREQ, len(self.abr_df.index)))
 
     def add_math_channels(self):
+        """Run calculations on data and store in new dataframe."""
         self.math_df = pd.DataFrame(index=self.abr_df.index)
         # https://stackoverflow.com/questions/18176933/create-an-empty-data-frame-with-index-from-another-data-frame
         self.add_cvt_ratio()
         self.add_ss_avgs()
 
     def add_ss_avgs(self):
+        """Identify steady-state regions of data and calculate average vals."""
         win_size_avg = 51  # window size for speed rolling avg.
         win_size_slope = 301 # win size for rolling slope of speed rolling avg.
 
@@ -1186,8 +1181,8 @@ class SSRun(SingleRun):
                            window=win_size_avg, center=True)["gnd_speed"].mean()
         # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.rolling.html
 
-        # Create and register a new tqdm instance with pandas. I don't know how this works.
-        # You have to manually feed it the total iteration count first.
+        # Create and register a new tqdm instance with pandas.
+        # Have to manually feed it the total iteration count.
         tqdm.pandas(total=len(self.abr_df.index)-(win_size_avg-1)-(win_size_slope-1))
         # https://stackoverflow.com/questions/48935907/tqdm-not-showing-bar
         self.Doc.print("\nCalculating rolling regression on ground speed data...")
@@ -1243,8 +1238,8 @@ class SSRun(SingleRun):
         # applying criteria to it for purpose of determining steady state.
         self.math_df["cvt_ratio_mskd"].mask(~ss_filter, inplace=True)
 
-        # Calculate overall (aggregate) mean of each filtereed/masked channel
-        # Prefill with NaN and assign mean to first element
+        # Calculate overall (aggregate) mean of each filtered/masked channel.
+        # Prefill with NaN and assign mean to first element.
         self.math_df["SS_gnd_spd_avg"] = np.nan
         self.math_df.at[0, "SS_gnd_spd_avg"] = np.mean(
                                                 self.math_df["gs_rol_avg_mskd"])
@@ -1278,6 +1273,7 @@ class SSRun(SingleRun):
         self.plot_ss_range()
 
     def plot_abridge_compare(self):
+        """Creates a plot showing what data was deemed unimportant and removed."""
         ax1 = plt.subplot(211)
         # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
         color = "tab:purple"
@@ -1288,7 +1284,6 @@ class SSRun(SingleRun):
         ax1.set_yticks([0, 20, 40, 60, 80, 100])
         ax1.set_ylabel("Throttle (deg)", color=color)
         ax1.tick_params(axis="y", labelcolor=color)
-        # plt.grid(True)
 
         ax2 = ax1.twinx() # second plot on same x axis
         # https://matplotlib.org/gallery/api/two_scales.html
@@ -1299,7 +1294,7 @@ class SSRun(SingleRun):
         ax2.set_yticks([0, 1])
         ax2.set_ylabel("Pedal Switch", color=color)
         ax2.tick_params(axis="y", labelcolor=color)
-        # plt.grid(True)
+
         plt.setp(ax1.get_xticklabels(), visible=False) # x labels only on bottom
 
         ax3 = plt.subplot(212, sharex=ax1, sharey=ax1)
@@ -1334,6 +1329,8 @@ class SSRun(SingleRun):
         # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
 
     def plot_ss_range(self):
+        """Creates a plot showing highlighted steady-state regions and the data
+        used to identify them."""
         ax1 = plt.subplot(311)
         plt.plot(self.abr_df.index/SAMPLING_FREQ, self.abr_df["gnd_speed"],
                                                 label="Ground Speed", color="k")
@@ -1344,7 +1341,7 @@ class SSRun(SingleRun):
         plt.title("Run %s - Steady-state Isolation (Abridged Data)"
                                                 % self.run_label, loc="left")
         plt.ylabel("Speed (mph)")
-        # plt.legend(loc="best")
+
         plt.setp(ax1.get_xticklabels(), visible=False)
 
         ax2 = plt.subplot(312, sharex=ax1)
@@ -1357,7 +1354,7 @@ class SSRun(SingleRun):
         self.math_df["es_rol_avg_mskd"], label="Steady-state", color="tab:blue")
 
         plt.ylabel("Engine Speed (rpm)")
-        # plt.legend(loc="best")
+
         plt.setp(ax2.get_xticklabels(), visible=False)
 
         ax3 = plt.subplot(313, sharex=ax1)
@@ -1394,16 +1391,13 @@ class DownhillRun(SingleRun):
     """Represents a single run with downhill engine-braking operation."""
 
     def abridge_data(self):
-        # Apply rolling avg filter to smooth data first.
-        # Apply mask to data to find which sections ground speed is increasing
-        # w/ pedal not pressed.
-
         # Need to repair any gaps in INCA samples. If pedal was actuated
         # when sampling cut out, and it was still actuated when the sampling
         # resumed, the abridge_data() algorithmm will treat that as a pedal lift
         # when it likely wasn't.
         self.knit_pedal_gaps()
 
+        # Apply rolling avg filter to smooth data.
         win_size_avg = 101  # window size for speed rolling avg.
         win_size_slope = 301 # win size for rolling slope of speed rolling avg.
         gspd_cr = 2.5     # mph. Ground speed (min) criterion for discerning
@@ -1434,7 +1428,7 @@ class DownhillRun(SingleRun):
                               & (gs_rolling_slope > gs_slope_cr)     )
         # NaNs in pedal channel treated as pedal up.
 
-        # Mask off every data point not meeting the filter criteria
+        # Mask off every data point not meeting the filter criteria.
         gs_rol_avg_mskd = gs_rolling_avg.mask(~downhill_filter)
         gs_rol_slope_mskd = gs_rolling_slope.mask(~downhill_filter)
         # Convert to a list of indices.
@@ -1488,7 +1482,6 @@ class DownhillRun(SingleRun):
                 # Adjust filter to eliminate these extraneous events.
                 downhill_filter[range[0]:range[1]] = False
                 pass
-                # Remove from downhill_filter
 
         if not valid_slopes:
             # If no times were stored, then alert user but continue with
@@ -1524,15 +1517,12 @@ class DownhillRun(SingleRun):
 
         # Add buffers on each side - find closest point where ground speed
         # <1 mph. Add additional second beyond that.
-        # Could do this with another filter. Then find closest val in filtered
-        # list. Bias down for first range val, bias up for second.
-        slow_filter = (gs_rolling_avg < 1) # mph
 
-        # Mask off every data point not meeting the filter criterion
+        slow_filter = (gs_rolling_avg < 1) # mph
+        # Mask off every data point not meeting the filter criterion.
         gs_rol_avg_slow = gs_rolling_avg.mask(~slow_filter)
         # Convert to a list of indices.
         slow_times = gs_rol_avg_slow[~gs_rol_avg_slow.isna()]
-        self.slow_times = slow_times
 
         # Now loop through event ranges and find "slow" times on either side
         # of range to expand and give context to the event.
@@ -1543,6 +1533,7 @@ class DownhillRun(SingleRun):
         for n, event_range in enumerate(valid_ranges):
             # Find closest neighbor value that is below 1 mph.
             try:
+                # Bias down for first range val
                 new_start_i = slow_times.index[slow_times.index.get_loc(event_range[0], method="ffill")]
             except KeyError:
                 # get_loc returns a KeyError if no value meeting our criteria
@@ -1550,8 +1541,8 @@ class DownhillRun(SingleRun):
                 new_start_i = 0
 
             try:
+                # Bias up for second range val.
                 new_end_i = slow_times.index[slow_times.index.get_loc(event_range[1], method="bfill")]
-                # new_end_i = slow_times[slow_times.index.get_loc(event_range[1], method="bfill")]
             except KeyError:
                 new_end_i = len(self.sync_df.index)-1
 
@@ -1565,7 +1556,7 @@ class DownhillRun(SingleRun):
         last_end_i = 0
         self.Doc.print("\nValid downhill ranges:")
         for n, event_range in enumerate(valid_slopes):
-            # Input each event range's gs_rolling_avg values into np.polyval
+            # Input each event range's gs_rolling_avg values into np.polyfit
             # Put them in new column. Everywhere else is NaN.
             coeff = np.polyfit(self.sync_df.index[event_range[0]:event_range[1]]/SAMPLING_FREQ,
                                gs_rolling_avg[event_range[0]:event_range[1]], 1)
@@ -1577,9 +1568,11 @@ class DownhillRun(SingleRun):
             trendlines[valid_ranges[n][0]:valid_ranges[n][1]-1] = poly_fxn(
                 self.sync_df.index[valid_ranges[n][0]:valid_ranges[n][1]-1]/SAMPLING_FREQ)
             # Subtracting one to end index to maintain a NaN between slopes,
-            # else plot would draw line joining them.
+            # else plot would draw vertical line joining them.
 
-            # Store slope value itself for later retrieval. This time in the precise window
+            # Store slope value itself for later retrieval, this time in the
+            # precise window. Same slope val stored at each index in continuous
+            # range.
             slopes[event_range[0]:event_range[1]] = coeff[0]
 
             self.Doc.print("\t%0.2f\t->\t%0.2f\t|    Slope: %+0.2f mph/s"
@@ -1591,9 +1584,9 @@ class DownhillRun(SingleRun):
             self.Doc.print("\t%0.2f\t->\t%0.2f"
                 % (event_time[0]/SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
 
-        # Make sure if two valid events are closer
-        # than 5s, don't cut into either one. Look at each pair of end/start
-        # points, and if they're closer than 5s, merge those two.
+        # Make sure if two valid events are closer than 5s, don't cut into
+        # either one. Look at each pair of end/start points, and if they're
+        # closer than 5s, merge those two.
         # This also handles cases where two or more ranges end up being
         # identical after widening window to closest low-speed areas.
         valid_ranges_c = [ valid_ranges[0] ]
@@ -1610,9 +1603,9 @@ class DownhillRun(SingleRun):
         for event_time in valid_ranges_c:
             self.Doc.print("\t%0.2f\t->\t%0.2f"
                 % (event_time[0]/SAMPLING_FREQ, event_time[1] / SAMPLING_FREQ))
-        self.Doc.print("")
+        self.Doc.print("") # blank line
 
-        # Split DataFrame into valid pieces; store in lists
+        # Split DataFrame into valid pieces; store in list
         valid_events = []
         # Cut up and re-join rolling avg channels too for later use.
         # Piggyback on sync_df for now.
@@ -1623,7 +1616,7 @@ class DownhillRun(SingleRun):
         self.sync_df["slopes"] = slopes
         desired_start_t = 0
         for n, time_range in enumerate(valid_ranges_c):
-            # create separate DataFrames for just this event
+            # create separate DataFrame for each event
             valid_event = self.sync_df[time_range[0]:time_range[1]]
 
             # shift time values to maintain continuity.
@@ -1633,7 +1626,7 @@ class DownhillRun(SingleRun):
 
             self.shift_time_series(valid_event, offset_val=-shift)
 
-            # Add events to lists
+            # Add event to list
             valid_events.append(valid_event)
 
             # define next start time to be next time value after new vector's
@@ -1647,8 +1640,8 @@ class DownhillRun(SingleRun):
 
         # Now re-assemble the DataFrame with only valid events.
         # Carries over rolling and filter channels added to sync_df above.
-        # https://pandas.pydata.org/pandas-docs/stable/user_guide/merging.html
         self.abr_df = pd.concat(valid_events)
+        # https://pandas.pydata.org/pandas-docs/stable/user_guide/merging.html
 
         self.Doc.print("\nabr_df after abridgement:", True)
         self.Doc.print(self.abr_df.to_string(max_rows=10, max_cols=7,
@@ -1659,6 +1652,7 @@ class DownhillRun(SingleRun):
                  self.abr_df.index[-1]/SAMPLING_FREQ, len(self.abr_df.index)))
 
     def add_math_channels(self):
+        """Run calculations on data and store in new dataframe."""
         self.math_df = pd.DataFrame(index=self.abr_df.index)
         # https://stackoverflow.com/questions/18176933/create-an-empty-data-frame-with-index-from-another-data-frame
 
@@ -1675,12 +1669,15 @@ class DownhillRun(SingleRun):
 
         # Keep the slopes channel for later export.
         self.abr_df.rename(columns={"slopes": "gnd_speed_reg_slope"}, inplace=True)
+        # https://datatofish.com/rename-columns-pandas-dataframe/
         CHANNEL_UNITS["gnd_speed_reg_slope"] = CHANNEL_UNITS["gnd_speed"] + "/s"
 
         self.add_cvt_ratio()
         self.add_downhill_avgs()
 
     def add_downhill_avgs(self):
+        """Downhill regions already identified. Calculate average vals for these
+        regions."""
         self.math_df["gs_rol_avg_mskd"] = self.math_df["gs_rolling_avg"].mask(~self.math_df["downhill_filter"])
         self.math_df["gs_rol_slope_mskd"] = self.math_df["gs_rolling_slope"].mask(~self.math_df["downhill_filter"])
         self.math_df["cvt_ratio_mskd"].mask(~self.math_df["downhill_filter"], inplace=True)
@@ -1691,7 +1688,7 @@ class DownhillRun(SingleRun):
         self.Doc.print("Total data points that meet downhill criteria: %d"
                                  % sum(self.math_df["downhill_filter"]), True)
 
-        # Create separate channels for engine-on and engine-off segments
+        # Create separate channels for engine-on and engine-off segments.
         engine_on = (self.abr_df["engine_spd"] > 0)
         engine_off = (self.abr_df["engine_spd"] == 0)
 
@@ -1720,11 +1717,12 @@ class DownhillRun(SingleRun):
                                 % self.math_df.at[0, "accel_avg_calc_eng_off"])
 
     def plot_data(self, overwrite=False, description=""):
-        # This performs all the actions in the parent class's method
+        # This performs all the actions in the parent class's method:
         super(DownhillRun, self).plot_data(overwrite, description)
         self.plot_downhill_range()
 
     def plot_abridge_compare(self):
+        """Creates a plot showing what data was deemed unimportant and removed."""
         ax1 = plt.subplot(211)
         # https://matplotlib.org/3.2.1/api/_as_gen/matplotlib.pyplot.subplot.html
         plt.plot(self.sync_df.index/SAMPLING_FREQ, self.sync_df["gnd_speed"], color="k")
@@ -1752,7 +1750,8 @@ class DownhillRun(SingleRun):
         # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
 
     def plot_downhill_range(self):
-        """Plot with downhill segments identified."""
+        """Creates a plot showing highlighted downhill regions and the data
+        used to identify them."""
         ax1 = plt.subplot(311)
         color = "k"
         # https://matplotlib.org/3.1.0/gallery/color/named_colors.html
@@ -1799,12 +1798,16 @@ class DownhillRun(SingleRun):
 
 
 class Output(object):
+    """Object to store terminal output for log dump if needed."""
+
     def __init__(self, verbose, warn_p):
         self.verbose = verbose
         self.warn_prompt = warn_p
         self.log_string = ""
 
     def print(self, string, verbose_only=False):
+        """Wrapper for standard print function that duplicates output to
+        run-specific buffer."""
         if verbose_only and not self.verbose:
             # Add everything to log even if not output to screen.
             self.add_to_log(string)
@@ -1822,23 +1825,20 @@ class Output(object):
         if self.warn_prompt:
             input("Press Enter to continue.")
         else:
-            self.print("")
+            self.print("") # blank line
 
     def get_log_dump(self):
         return self.log_string
 
 
 def main_prog():
+    """This program runs when Python runs this file."""
     global LOG_DIR
 
     # Set up command-line argument parser
     # https://docs.python.org/3/howto/argparse.html
     # If you pass in any arguments from the command line after "python run.py",
-    # This pulls them in. If "-a" or "--auto" specified, process all data.
-    # If "-o" or "--over" specified, then overwrite any existing exports in
-    # the ./sync_data folder (without prompting).
-    # If "-p" or "-plot" specified, plot the data before and after syncing
-    # for comparison.
+    # this interprets them.
     parser = argparse.ArgumentParser(description="Program to preprocess Ex1 "
                                                 "CVT data for easier analysis")
     parser.add_argument("-a", "--auto", help="Automatically process all data "
@@ -1857,7 +1857,6 @@ def main_prog():
                             "error encountered.", type=str, default=LOG_DIR)
     parser.add_argument("-i", "--ignore-warn", help="Do not prompt user to "
                                 "acknowledge warnings.", action="store_false")
-
     # https://www.programcreek.com/python/example/748/argparse.ArgumentParser
     args = parser.parse_args()
 
