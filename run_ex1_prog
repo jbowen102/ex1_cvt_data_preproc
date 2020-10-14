@@ -110,13 +110,6 @@ printf "\nCopying plots to P:/.../SYNCED_DATA/${TIMESTAMP} folder...\n"
 rsync -rhziv --progress ${LOCAL_FIG}/ "${REMOTE_SYNC}/${TIMESTAMP}" | sed  's/^/  /'
 printf "Finished transferring plots to P: drive.\n"
 # Looks at size and mod time to determine if file needs updating.
-# NTFS mod times not preserved though, so effect is that it will replace any
-# file that's in dest folder with same name. Could use file size only to infer
-# difference but the sync files may not change size every time even when data
-# change.
-# No extraneous files are removed. If dest contains other processed runs not
-# included in the current batch, they'll be left alone. This means multiple
-# figs will exist for same run because of hash val changing.
 # Piping to 'sed' bash program to indent rsync output to aid readability.
 
 # References:
