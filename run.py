@@ -802,6 +802,12 @@ class SingleRun(object):
         # https://stackoverflow.com/questions/29763620/how-to-select-all-columns-except-one-column-in-pandas
 
         if self.get_run_type() == "SSRun":
+            # Pad the columns to not overlap Downhill-specific columns.
+            speed_index = export_df.columns.get_loc("gnd_speed")
+            export_df.insert(speed_index + 1, "gnd_speed_reg_slope", np.nan)
+            CHANNEL_UNITS["gnd_speed_reg_slope"] = CHANNEL_UNITS["gnd_speed"] + "/s"
+
+            # Add some channels from math_df
             export_df["SS_gnd_spd_avg_calc"] = self.math_df["SS_gnd_spd_avg"]
             export_df["SS_eng_spd_avg_calc"] = self.math_df["SS_eng_spd_avg"]
             export_df["SS_cvt_ratio_avg_calc"] = self.math_df["SS_cvt_ratio_avg"]
@@ -810,7 +816,7 @@ class SingleRun(object):
             CHANNEL_UNITS["SS_cvt_ratio_avg_calc"] = CHANNEL_UNITS["CVT_ratio_calc"]
 
         elif self.get_run_type() == "DownhillRun":
-            # Pad the columns to not use same columns as SS run.
+            # Pad the columns to not overlap SS-specific columns.
             export_df[" "] = np.nan
             export_df["  "] = np.nan
             export_df["   "] = np.nan
@@ -818,10 +824,18 @@ class SingleRun(object):
             CHANNEL_UNITS["  "] = ""
             CHANNEL_UNITS["   "] = ""
 
+            # Add some channels from math_df
             export_df["accel_avg_calc_eng_on"] = self.math_df["accel_avg_calc_eng_on"]
             export_df["accel_avg_calc_eng_off"] = self.math_df["accel_avg_calc_eng_off"]
             CHANNEL_UNITS["accel_avg_calc_eng_on"] = CHANNEL_UNITS["gnd_speed"] + "/s"
             CHANNEL_UNITS["accel_avg_calc_eng_off"] = CHANNEL_UNITS["accel_avg_calc_eng_on"]
+
+        # More column-padding, but only needed for runs w/o torque meters.
+        if int(self.run_label[:2]) < 6:
+            speed_index = export_df.columns.get_loc("gnd_speed")
+            export_df.insert(speed_index, "rear_wtq_combined", np.nan)
+            CHANNEL_UNITS["rear_wtq_combined"] = CHANNEL_UNITS["wtq_RR"]
+
 
         # Replace any NaNs with blanks
         export_df.fillna("", inplace=True)
@@ -926,7 +940,7 @@ class SSRun(SingleRun):
 
     def abridge_data(self):
         """Isolates important events in data by removing any long stretches of
-        no pedal input of pedal events during which the throttle position not
+        no pedal input or pedal events during which the throttle position not
         sustained above threshold for enough time.
         """
         # Define constants used to isolating valid events.
@@ -1391,6 +1405,9 @@ class DownhillRun(SingleRun):
     """Represents a single run with downhill engine-braking operation."""
 
     def abridge_data(self):
+        """Isolates important events in data based on criteria associated
+        with downhill operation.
+        """
         # Need to repair any gaps in INCA samples. If pedal was actuated
         # when sampling cut out, and it was still actuated when the sampling
         # resumed, the abridge_data() algorithmm will treat that as a pedal lift
