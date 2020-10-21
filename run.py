@@ -349,7 +349,14 @@ class SingleRun(object):
                 raw_inca_dict[channel] = []
 
             for i, INCA_row in enumerate(INCA_file_in):
-                if i < INCA_HEADER_HT:
+                if i == 2:
+                    # print channel order for debugging
+                    self.Doc.print("\tINCA file channels:\t" +
+                                "  -  ".join([str(c) for c in INCA_row]), True)
+                    self.Doc.print("\tAssumed channel order:\t" +
+                           "  -  ".join([str(c) for c in INCA_CHANNELS]), True)
+                    continue
+                elif i < INCA_HEADER_HT:
                     # ignore headers
                     continue
                 else:
