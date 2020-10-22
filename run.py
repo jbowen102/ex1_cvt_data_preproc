@@ -133,8 +133,8 @@ class RunGroup(object):
                 dup_answ = ""
                 while dup_answ.lower() not in ["1", "2"]:
                     print("More than one run %s found in %s:\n"
-                        "\t'%s'\n"
-                        "\t'%s'\n"
+                        "\t1. '%s'\n"
+                        "\t2. '%s'\n"
                         "Which one should be used as run %s? (1/2)"
                         % (ThisRun.get_run_label(), RAW_INCA_DIR,
                          self.run_dict[ThisRun.get_run_label()].get_inca_filename(),
@@ -355,6 +355,13 @@ class SingleRun(object):
                                 "  -  ".join([str(c) for c in INCA_row]), True)
                     self.Doc.print("\tAssumed channel order:\t" +
                            "  -  ".join([str(c) for c in INCA_CHANNELS]), True)
+
+                    # Explicitly check for improper channel order:
+                    if ("time" not in INCA_row[INCA_CHANNELS.index("time")] or
+                       "SW_PEDAL" not in INCA_row[INCA_CHANNELS.index("pedal_sw")] or
+                       "NE" not in INCA_row[INCA_CHANNELS.index("engine_spd")] or
+                       "THagr" not in INCA_row[INCA_CHANNELS.index("throttle")]):
+                       raise DataReadError("Bad channel order in INCA file.")
                     continue
                 elif i < INCA_HEADER_HT:
                     # ignore headers
