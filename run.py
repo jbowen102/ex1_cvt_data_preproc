@@ -86,12 +86,12 @@ class DataSyncError(Exception):
 
 class RunGroup(object):
     """Represents a collection of runs from the raw_data directory."""
-    def __init__(self, process_all=False, verbose=False, warn=False):
+    def __init__(self, process_all=False, start_run=False, verbose=False, warn=False):
         self.verbosity = verbose
         self.warn_p = warn
         # create SingleRun object for each run but don't read in data yet.
         self.build_run_dict()
-        self.process_runs(process_all)
+        self.process_runs(process_all, start_run)
 
     def build_run_dict(self):
         """Creates dictionary with an entry for each INCA run in raw_data dir."""
@@ -106,7 +106,8 @@ class RunGroup(object):
             if os.path.isdir(os.path.join(RAW_INCA_DIR, file)):
                 continue # ignore any directories found
 
-            if "decel" in file.lower() or "deccel" in file.lower():
+            if ("decel" in file.lower() or "deccel" in file.lower()
+                                                or "downhill" in file.lower()):
                 try:
                     ThisRun = self.create_downhill_run(file)
                 except FilenameError as exception_text:
@@ -157,11 +158,19 @@ class RunGroup(object):
         return DownhillRun(os.path.join(RAW_INCA_DIR, filename), self.verbosity,
                                                                     self.warn_p)
 
-    def process_runs(self, process_all=False):
-        """Processes all runs in RunGroup."""
+    def process_runs(self, process_all, start_run):
+        """Processes runs in RunGroup."""
         if process_all:
             # automatically process all INCA runs (below)
-            self.runs_to_process = self.run_dict
+            self.runs_to_process = dict(self.run_dict) # avoids aliasing.
+            if start_run:
+                if not self.validate_run_num(start_run):
+                    raise FileNameError("Cannot find matching INCA run for -s "
+                                                    "argument %s" % start_run)
+                # Remove earlier runs
+                for run_num in self.run_dict.keys():
+                    if run_num < start_run:
+                        self.runs_to_process.pop(run_num)
         else:
             # prompt user for single run to process.
             OnlyRun = self.prompt_for_run()
@@ -234,15 +243,22 @@ class RunGroup(object):
         Returns SingleRun object."""
         run_prompt = "Enter run num (four digits)\n> "
         target_run_num = input(run_prompt)
-        while len(target_run_num) != 4:
-            target_run_num = input("Need a four-digit number. %s" % run_prompt)
 
-        TargetRun = self.run_dict.get(target_run_num)
-        if TargetRun:
-            return TargetRun
+        while not self.validate_run_num(target_run_num):
+            target_run_num = input(run_prompt)
+
+        return self.run_dict.get(target_run_num)
+
+    def validate_run_num(self, target_run_num):
+        """Check if user-entered run num is valid."""
+        if len(target_run_num) != 4:
+            print("Need a four-digit number.")
+            return False
+        elif self.run_dict.get(target_run_num):
+            return True
         else:
             print("No valid INCA file found matching that run.")
-            return self.prompt_for_run()
+            return False
 
 
 class SingleRun(object):
@@ -1888,6 +1904,8 @@ def main_prog():
                             "error encountered.", type=str, default=LOG_DIR)
     parser.add_argument("-i", "--ignore-warn", help="Do not prompt user to "
                                 "acknowledge warnings.", action="store_false")
+    parser.add_argument("-s", "--start", help="Specify run number to start with"
+        "when processing all runs (with -a option).", type=str, default=False)
     # https://www.programcreek.com/python/example/748/argparse.ArgumentParser
     args = parser.parse_args()
 
@@ -1896,7 +1914,7 @@ def main_prog():
     else:
         raise FilenameError("Bad log-dir argument. Must be valid path. Aborting.")
 
-    AllRuns = RunGroup(args.auto, args.verbose, args.ignore_warn)
+    AllRuns = RunGroup(args.auto, args.start, args.verbose, args.ignore_warn)
 
     if args.plot and PLOT_LIB_PRESENT:
         if not os.path.exists(PLOT_DIR):
