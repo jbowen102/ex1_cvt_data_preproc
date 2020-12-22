@@ -103,13 +103,15 @@ fi
 
 # Copy synced data to P: drive.
 printf "\nCopying synced data (CSVs) to P:/.../SYNCED_DATA/${TIMESTAMP} folder...\n"
-rsync -rhziv --progress ${LOCAL_SYNC}/ "${REMOTE_SYNC}/${TIMESTAMP}" | sed  's/^/  /'
+rsync -rchziv --progress ${LOCAL_SYNC}/ "${REMOTE_SYNC}/${TIMESTAMP}" | sed  's/^/  /'
 printf "Finished transferring CSV data to P: drive.\n"
 
 printf "\nCopying plots to P:/.../SYNCED_DATA/${TIMESTAMP} folder...\n"
-rsync -rhziv --progress ${LOCAL_FIG}/ "${REMOTE_SYNC}/${TIMESTAMP}" | sed  's/^/  /'
+rsync -rchziv --progress ${LOCAL_FIG}/ "${REMOTE_SYNC}/${TIMESTAMP}" | sed  's/^/  /'
 printf "Finished transferring plots to P: drive.\n"
-# Looks at size and mod time to determine if file needs updating.
+# -c: Looks at checksum to determine if file needs updating. NTFS mod times not
+# preserved in transfer, so standard size-or-mod time criterion not a reliable
+# indicator of difference. Not critical since exporting to new folder each time.
 # Piping to 'sed' bash program to indent rsync output to aid readability.
 
 # References:
