@@ -768,6 +768,8 @@ class SingleRun(object):
             ax3.text(ax3.get_xlim()[0], y_pos, "  " + str(round(avg, 1)),
                                                 color=color, fontsize="x-small")
         ax3.set_ylabel("CVT Ratio Calc")
+        ax3.set_xlabel("Time (s)")
+
 
         # plt.show() # can't use w/ WSL. Export instead.
         # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
@@ -1789,6 +1791,7 @@ class DownhillRun(SingleRun):
         plt.plot(self.math_df.index/SAMPLING_FREQ, self.math_df["gs_rol_avg_mskd"], color="r")
 
         ax2.set_ylabel("Speed (mph)")
+        ax2.set_xlabel("Time (s)")
 
         # plt.show() # can't use w/ WSL. Export instead.
         # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
@@ -1886,7 +1889,7 @@ def main_prog():
     # https://docs.python.org/3/howto/argparse.html
     # If you pass in any arguments from the command line after "python run.py",
     # this interprets them.
-    parser = argparse.ArgumentParser(description="Program to preprocess Ex1 "
+    parser = argparse.ArgumentParser(description="Program to preprocess EX1 "
                                                 "CVT data for easier analysis")
     parser.add_argument("-a", "--auto", help="Automatically process all data "
                                     "in raw_data folders.", action="store_true")
