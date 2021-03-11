@@ -39,9 +39,15 @@ else
 fi
 
 
+# Purge local output folders
 if [ -d ${LOCAL_SYNC} ] && [ "$(ls -A ${LOCAL_SYNC}/)" ]
 then
 	rm ${LOCAL_SYNC}/*
+fi
+
+if [ -d ${LOCAL_FIG} ] && [ "$(ls -A ${LOCAL_FIG}/)" ]
+then
+	rm ${LOCAL_FIG}/*
 fi
 
 

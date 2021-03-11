@@ -1907,7 +1907,7 @@ def main_prog():
                             "error encountered.", type=str, default=LOG_DIR)
     parser.add_argument("-i", "--ignore-warn", help="Do not prompt user to "
                                 "acknowledge warnings.", action="store_false")
-    parser.add_argument("-s", "--start", help="Specify run number to start with"
+    parser.add_argument("-s", "--start", help="Specify run number to start with "
         "when processing all runs (with -a option).", type=str, default=False)
     # https://www.programcreek.com/python/example/748/argparse.ArgumentParser
     args = parser.parse_args()
