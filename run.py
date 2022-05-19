@@ -20,6 +20,7 @@ import hashlib
 import glob
 from tqdm import tqdm
 import copy
+import re
 
 try:
     import matplotlib
@@ -106,8 +107,7 @@ class RunGroup(object):
             if os.path.isdir(os.path.join(RAW_INCA_DIR, file)):
                 continue # ignore any directories found
 
-            if ("decel" in file.lower() or "deccel" in file.lower()
-                                                or "downhill" in file.lower()):
+            if re.findall(r"(dec{1,2}el)|(downhill)", file, flags=re.IGNORECASE):
                 try:
                     ThisRun = self.create_downhill_run(file)
                 except FilenameError as exception_text:
@@ -273,15 +273,10 @@ class SingleRun(object):
         self.parse_run_num()
 
     def parse_run_num(self):
-        try:
-            self.run_label = self.INCA_filename.split("_")[1][0:4]
-        except IndexError:
-            raise FilenameError("INCA filename '%s' not in correct format.\n"
-            "Expected format is "
-            "'[pretext]_[four-digit run num][anything else]'.\nNeed the four "
-            "characters that follow the first underscore to be run num."
-                                                        % self.INCA_filename)
-        if any(not char.isdigit() for char in self.run_label):
+        run_num_match = re.findall(r"(?<=_)\d{4}(?=-)", self.INCA_filename):
+        if run_num_match:
+            self.run_label = run_num_match[0]
+        else:
             raise FilenameError("INCA filename '%s' not in correct format.\n"
             "Expected format is "
             "'[pretext]_[four-digit run num][anything else]'.\nNeed the four "
@@ -312,11 +307,11 @@ class SingleRun(object):
         for eDAQ_run in all_eDAQ_runs:
             if os.path.isdir(os.path.join(RAW_EDAQ_DIR, eDAQ_run)):
                 continue # ignore any directories found
-            # Split the extension off the file name, then isolate the final two
-            # numbers off the four-digit run num.
-            try:
-                run_num_i = os.path.splitext(eDAQ_run)[0].split("_")[1][0:2]
-            except IndexError:
+
+            run_num_match = re.findall(r"(?<=\d{8}_)\d{2}(?=[.-])", eDAQ_run)
+            if run_num_match:
+                run_num_i = run_num_match[0]
+            else:
                 raise FilenameError("eDAQ filename '%s' not in correct format."
                 "\nExpected format is "
                 "'[pretext]_[two-digit file num][anything else]'.\nNeed the "
