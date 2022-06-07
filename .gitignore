@@ -4,8 +4,10 @@ __pycache__/
 *.out
 run_test.py
 fft_test.py
-/raw_data
-/sync_data
-/plots
-/reference_docs
-/figs
+
+# Ignore any file/dir/symlink starting w/ these names:
+raw_data*
+sync_data*
+plots*
+reference_docs*
+figs*
