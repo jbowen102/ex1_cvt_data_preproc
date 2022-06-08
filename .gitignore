@@ -2,8 +2,9 @@ __pycache__/
 .~*
 *.pyc
 *.out
-run_test.py
-fft_test.py
+
+# Ignore experimental TEST scripts
+*_TEST.py
 
 # Ignore any file/dir/symlink starting w/ these names:
 raw_data*
