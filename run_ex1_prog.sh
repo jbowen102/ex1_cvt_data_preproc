@@ -96,14 +96,13 @@ cd ~/ex1_cvt_data_preproc # Need to be in the project dir for the Python script 
 printf "\nStarting Python script:\n"
 python3 run.py --auto --over --plot --ignore-warn --log-dir "${REMOTE_SYNC}/${TIMESTAMP}"
 PYTHON_RETURN=$? # gets return value of last command executed.
-printf "Finished Python script.\n"
-
 
 # Make sure the program ran correctly
-if [ ${PYTHON_RETURN} -ne 0 ]
-then
+if [ ${PYTHON_RETURN} -ne 0 ]; then
 	printf "\nSomething went wrong when executing the Python program.\n"
 	exit 1
+else
+	printf "Finished Python script.\n"
 fi
 
 
