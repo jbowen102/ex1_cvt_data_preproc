@@ -41,9 +41,11 @@ PLOT_DIR = "./figs"
 # Find Desktop path, default destination for log files.
 username = getpass.getuser()
 # https://stackoverflow.com/questions/842059/is-there-a-portable-way-to-get-the-current-username-in-python
-home_contents = os.listdir("/mnt/c/Users/%s" % username)
-onedrive = [folder for folder in home_contents if "OneDrive -" in folder][0]
-LOG_DIR = "/mnt/c/Users/%s/%s/Desktop" % (username, onedrive)
+home = os.path.join("/mnt/c/Users", "%s" % username)
+onedrives = [folder for folder in os.listdir(home) if "OneDrive -" in folder][0]
+assert len(onedrives) == 1, "Found more than one OneDrive folder. Unhandled exception"
+onedrive = onedrives[0]
+LOG_DIR = os.path.join(home, "%s", "Desktop" % (username, onedrive))
 
 
 # global constants: raw data format
